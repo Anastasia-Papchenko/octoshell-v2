@@ -7,6 +7,12 @@ Sessions::Engine.routes.draw do
     post :replies
   end
 
+  namespace :admin do
+    get 'analytics', to: 'analytics#index'
+  
+end
+
+
   resources :user_surveys, path: :surveys, only: [:index, :show, :edit, :update] do
     put :accept
     patch :submit
