@@ -1,5 +1,7 @@
 ---
 ru:
+  admin_submenu:
+    analytics: Аналитика
   abilities:
     reports:
       access: Доступ в раздел отчетов

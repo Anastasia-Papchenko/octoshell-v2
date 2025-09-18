@@ -1,0 +1,41 @@
+- content_for :page_title do
+  = 'Аналитика'
+
+.div.page-header
+  h1 Аналитика
+
+/ Локальные вкладки «Отчёты / Аналитика»
+.nav.nav-tabs
+  li class=(current_page?(admin_reports_path) ? 'active' : '')
+    = link_to 'Отчёты', admin_reports_path
+  li class=(current_page?(admin_analytics_path) ? 'active' : '')
+    = link_to 'Аналитика', admin_analytics_path
+
+/ (необязательно) KPI-плитки сверху
+.row
+  .col-md-3
+    .panel.panel-default
+      .panel-heading Всего отчётов
+      .panel-body
+        strong = @total_reports
+  .col-md-3
+    .panel.panel-default
+      .panel-heading Отправлены
+      .panel-body
+        strong = @submitted_reports
+  .col-md-3
+    .panel.panel-default
+      .panel-heading На оценке
+      .panel-body
+        strong = @assessing_reports
+  .col-md-3
+    .panel.panel-default
+      .panel-heading Отклонены
+      .panel-body
+        strong = @rejected_reports
+
+/ Форма фильтров (можно скопировать ту же разметку, что в reports#index, или оставить только таблицу)
+/ Если хочешь — просто вставь тот же блок формы сюда.
+
+/ Переиспользуем готовую таблицу отчётов
+= render 'sessions/admin/reports/table'
