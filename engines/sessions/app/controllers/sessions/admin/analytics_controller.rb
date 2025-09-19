@@ -1,7 +1,7 @@
 module Sessions
   class Admin::AnalyticsController < Admin::ApplicationController
-    # before_action :octo_authorize!   # ← убираем, он ломается на новом пути
-    before_action -> { authorize! :manage, :reports }  # или :read, :reports — как у вас принято
+    before_action :octo_authorize!   # ← убираем, он ломается на новом пути
+    # before_action -> { authorize! :manage, :reports }  # или :read, :reports — как у вас принято
 
     octo_use(:project_class, :core, 'Project')
 
