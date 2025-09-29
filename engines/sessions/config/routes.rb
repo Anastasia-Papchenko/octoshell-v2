@@ -8,9 +8,10 @@ Sessions::Engine.routes.draw do
   end
 
   namespace :admin do
-    get 'analytics', to: 'analytics#index'
-  
-end
+    resources :analytics, only: [:index] do
+      post :sinfo, on: :collection
+    end
+  end
 
 
   resources :user_surveys, path: :surveys, only: [:index, :show, :edit, :update] do
