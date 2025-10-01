@@ -60,7 +60,7 @@ module Sessions
     end
 
     def sinfo
-      fetcher = Sessions::Admin::Analytics::SinfoFetcher.new(
+      fetcher = Sessions::SinfoFetcher.new(
         host: ENV.fetch("HPC_HOST", "188.44.52.12"),
         user: ENV.fetch("HPC_USER", "papchenko30_2363"),
         auth: { forward_agent: true }
@@ -84,9 +84,9 @@ module Sessions
         end
         format.any { render plain: @sinfo_log.to_s, status: 200 }
       end
-    rescue => e
-      Rails.logger.error("[analytics#sinfo] #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}")
-      render plain: "analytics#sinfo FAILED: #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}", status: 500
+    # rescue => e
+    #   Rails.logger.error("[analytics#sinfo] #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}")
+    #   render plain: "analytics#sinfo FAILED: #{e.class}: #{e.message}\n#{e.backtrace.join("\n")}", status: 500
     end
 
 
@@ -94,7 +94,7 @@ module Sessions
 
     def role?(name)
       return false unless current_user
-  
+
       sym = name.to_sym
       pred = "#{sym}?".to_sym
       if current_user.respond_to?(pred)
