@@ -327,6 +327,7 @@ GEM
     awesome_nested_set (3.5.0)
       activerecord (>= 4.0.0, < 7.1)
     bcrypt (3.1.18)
+    bcrypt_pbkdf (1.1.1)
     bootsnap (1.13.0)
       msgpack (~> 1.2)
     bootstrap-datepicker-rails (1.9.0.1)
@@ -414,6 +415,7 @@ GEM
       dry-core (~> 0.5, >= 0.5)
       dry-initializer (~> 3.0)
       dry-schema (~> 1.8, >= 1.8.0)
+    ed25519 (1.3.0)
     erubi (1.12.0)
     execjs (2.8.1)
     factory_bot (6.2.1)
@@ -765,6 +767,7 @@ DEPENDENCIES
   announcements!
   api!
   authentication!
+  bcrypt_pbkdf (~> 1.1)
   bootsnap
   bootstrap_form
   cancancan
@@ -776,6 +779,7 @@ DEPENDENCIES
   core!
   database_cleaner
   decorators (~> 2.0.3)
+  ed25519 (~> 1.3)
   face!
   factory_bot_rails
   foreman

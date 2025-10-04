@@ -1,6 +1,9 @@
 source "https://rubygems.org"
 gem "rake"
 gem "rails", "~> 5.0"
+gem 'ed25519', '~> 1.3'      
+gem 'bcrypt_pbkdf', '~> 1.1' 
+
 #-----------------------------------------
 gem "honeybadger", "~> 4.8"
 
