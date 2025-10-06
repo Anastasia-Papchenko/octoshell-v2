@@ -40,6 +40,7 @@ module Sessions
             end
           end
 
+          rows = rows.reverse.uniq { |snap_id, node_id, _p, _s, _r| [snap_id, node_id] }.reverse
           rows_written = bulk_upsert_node_states(rows)
 
           {
@@ -81,9 +82,10 @@ module Sessions
 
     def ensure_enum_and_tables!
       conn = ActiveRecord::Base.connection
+      enum_values_sql = STATES.map { |s| conn.quote(s) }.join(', ')
 
       conn.execute(<<~SQL)
-        DO $$
+        DO $plpgsql$
         BEGIN
           IF NOT EXISTS (
             SELECT 1
@@ -91,11 +93,12 @@ module Sessions
             JOIN pg_namespace n ON n.oid = t.typnamespace
             WHERE t.typname = 'slurm_node_state' AND n.nspname = '#{SCHEMA}'
           ) THEN
-            EXECUTE 'CREATE TYPE #{qualified('slurm_node_state')} AS ENUM (#{STATES.map { |s| "'#{s}'" }.join(', ')})';
+            EXECUTE $$CREATE TYPE #{qualified('slurm_node_state')} AS ENUM (#{enum_values_sql})$$;
           END IF;
         END;
-        $$;
+        $plpgsql$;
       SQL
+
 
       conn.execute(<<~SQL)
         CREATE TABLE IF NOT EXISTS #{qualified('slurm_partitions')} (
@@ -159,8 +162,14 @@ module Sessions
       SQL
     end
 
-    def qualified(name) = %("#{SCHEMA}".#{name})
-    def quoted_ident(name) = %("#{name}")
+    def qualified(name)
+      %("#{SCHEMA}".#{name})
+    end
+
+    def quoted_ident(name)
+      %("#{name}")
+    end
+
 
     def insert_snapshot!
       sql = <<~SQL
