@@ -10,9 +10,10 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 2025_03_31_194719) do
+ActiveRecord::Schema.define(version: 2025_10_15_110943) do
 
   # These are extensions that must be enabled in order to support this database
+  enable_extension "pgcrypto"
   enable_extension "plpgsql"
 
   create_table "announcement_recipients", id: :serial, force: :cascade do |t|
@@ -308,13 +309,6 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
 
   create_table "comments_tags", id: :serial, force: :cascade do |t|
     t.string "name"
-  end
-
-  create_table "common_files", force: :cascade do |t|
-    t.text "description"
-    t.string "file"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
   end
 
   create_table "core_access_fields", id: :serial, force: :cascade do |t|
@@ -825,6 +819,16 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
     t.index ["name"], name: "index_jobstat_data_types_on_name"
   end
 
+  create_table "jobstat_digest_buf", id: false, force: :cascade do |t|
+    t.integer "id"
+    t.string "name"
+    t.bigint "job_id"
+    t.float "value"
+    t.datetime "time"
+    t.datetime "created_at"
+    t.datetime "updated_at"
+  end
+
   create_table "jobstat_digest_float_data", id: :serial, force: :cascade do |t|
     t.string "name"
     t.bigint "job_id"
@@ -832,6 +836,7 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
     t.datetime "time"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
+    t.index ["id"], name: "jobstat_digest_float_data_pkey"
     t.index ["job_id"], name: "index_jobstat_digest_float_data_on_job_id"
   end
 
@@ -893,16 +898,6 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["job_id"], name: "index_jobstat_string_data_on_job_id"
-  end
-
-  create_table "octo_settings", force: :cascade do |t|
-    t.string "key"
-    t.text "value_ru"
-    t.text "value_en"
-    t.string "kind"
-    t.boolean "active"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
   end
 
   create_table "options", id: :serial, force: :cascade do |t|
@@ -1033,12 +1028,6 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
     t.datetime "updated_at"
     t.integer "subject_id"
     t.index ["group_id"], name: "index_permissions_on_group_id"
-  end
-
-  create_table "policies", force: :cascade do |t|
-    t.string "title"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
   end
 
   create_table "profiles", id: :serial, force: :cascade do |t|
@@ -1183,6 +1172,31 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
     t.index ["session_id", "survey_id"], name: "index_sessions_user_surveys_on_session_id_and_survey_id"
     t.index ["session_id"], name: "index_sessions_user_surveys_on_session_id"
     t.index ["user_id"], name: "index_sessions_user_surveys_on_user_id"
+  end
+
+# Could not dump table "slurm_node_snapshot" because of following StandardError
+#   Unknown type 'slurm_node_state' for column 'state'
+
+  create_table "slurm_nodes", force: :cascade do |t|
+    t.text "hostname", null: false
+    t.text "prefix", null: false
+    t.integer "number"
+    t.index ["hostname"], name: "index_octo.slurm_nodes_on_hostname", unique: true
+    t.index ["prefix", "number"], name: "idx_slurm_nodes_prefix_number"
+  end
+
+  create_table "slurm_partitions", force: :cascade do |t|
+    t.text "name", null: false
+    t.text "time_limit"
+    t.index ["name"], name: "index_octo.slurm_partitions_on_name", unique: true
+  end
+
+  create_table "slurm_snapshots", force: :cascade do |t|
+    t.datetime "captured_at", default: -> { "now()" }, null: false
+    t.text "source_cmd", default: "sinfo -a", null: false
+    t.text "raw_text", null: false
+    t.text "parser_version", default: "v1", null: false
+    t.index ["captured_at"], name: "idx_slurm_snapshots_captured_at", order: :desc
   end
 
   create_table "statistics_organization_stats", id: :serial, force: :cascade do |t|
@@ -1431,5 +1445,8 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
   end
 
   add_foreign_key "core_bot_links", "users"
+  add_foreign_key "slurm_node_snapshot", "slurm_nodes", column: "node_id", on_delete: :restrict
+  add_foreign_key "slurm_node_snapshot", "slurm_partitions", column: "partition_id", on_delete: :restrict
+  add_foreign_key "slurm_node_snapshot", "slurm_snapshots", column: "snapshot_id", on_delete: :cascade
   add_foreign_key "support_field_values", "support_topics_fields", column: "topics_field_id"
 end

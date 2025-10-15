@@ -1,5 +1,3 @@
-require 'set'
-
 module Sessions
   class SinfoIngestor
     SCHEMA = (ENV['PG_SCHEMA'].presence || 'octo').freeze
@@ -17,12 +15,9 @@ module Sessions
 
       with_schema_context do
         with_silenced_ar do
-          ensure_schema!            
-          ensure_enum_and_tables!  
-
           snapshot_id = insert_snapshot!
 
-          parsed_lines   = parse_table_lines(@raw)
+          parsed_lines    = parse_table_lines(@raw)
           partition_names = parsed_lines.map { |h| h[:partition] }.to_set
           hostnames       = parsed_lines.flat_map { |h| h[:hostnames] }.to_set
 
@@ -74,92 +69,6 @@ module Sessions
 
     def with_schema_context
       ActiveRecord::Base.connection_pool.with_connection { yield }
-    end
-
-    def ensure_schema!
-      ActiveRecord::Base.connection.execute(%(CREATE SCHEMA IF NOT EXISTS #{quoted_ident(SCHEMA)};))
-    end
-
-    def ensure_enum_and_tables!
-      conn = ActiveRecord::Base.connection
-      enum_values_sql = STATES.map { |s| conn.quote(s) }.join(', ')
-
-      conn.execute(<<~SQL)
-        DO $plpgsql$
-        BEGIN
-          IF NOT EXISTS (
-            SELECT 1
-            FROM pg_type t
-            JOIN pg_namespace n ON n.oid = t.typnamespace
-            WHERE t.typname = 'slurm_node_state' AND n.nspname = '#{SCHEMA}'
-          ) THEN
-            EXECUTE $$CREATE TYPE #{qualified('slurm_node_state')} AS ENUM (#{enum_values_sql})$$;
-          END IF;
-        END;
-        $plpgsql$;
-      SQL
-
-
-      conn.execute(<<~SQL)
-        CREATE TABLE IF NOT EXISTS #{qualified('slurm_partitions')} (
-          id         SERIAL PRIMARY KEY,
-          name       TEXT UNIQUE NOT NULL,
-          time_limit TEXT
-        );
-      SQL
-
-      conn.execute(<<~SQL)
-        CREATE TABLE IF NOT EXISTS #{qualified('slurm_snapshots')} (
-          id              BIGSERIAL PRIMARY KEY,
-          captured_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-          source_cmd      TEXT NOT NULL DEFAULT 'sinfo -a',
-          raw_text        TEXT NOT NULL,
-          parser_version  TEXT NOT NULL DEFAULT 'v1'
-        );
-      SQL
-
-      conn.execute(<<~SQL)
-        CREATE TABLE IF NOT EXISTS #{qualified('slurm_nodes')} (
-          id        BIGSERIAL PRIMARY KEY,
-          hostname  TEXT UNIQUE NOT NULL,
-          prefix    TEXT NOT NULL,
-          number    INT
-        );
-      SQL
-
-      conn.execute(<<~SQL)
-        CREATE TABLE IF NOT EXISTS #{qualified('slurm_node_snapshot')} (
-          snapshot_id   BIGINT NOT NULL REFERENCES #{qualified('slurm_snapshots')}(id) ON DELETE CASCADE,
-          node_id       BIGINT NOT NULL REFERENCES #{qualified('slurm_nodes')}(id)     ON DELETE RESTRICT,
-          partition_id  INT    NOT NULL REFERENCES #{qualified('slurm_partitions')}(id) ON DELETE RESTRICT,
-          state         #{qualified('slurm_node_state')} NOT NULL,
-          has_reason    BOOLEAN NOT NULL DEFAULT FALSE,
-          PRIMARY KEY (snapshot_id, node_id)
-        );
-      SQL
-
-      ensure_index!('slurm_snapshots',     'idx_slurm_snapshots_captured_at',   'captured_at DESC')
-      ensure_index!('slurm_node_snapshot', 'idx_node_snapshot_partition_state', 'partition_id, state')
-      ensure_index!('slurm_nodes',         'idx_slurm_nodes_prefix_number',     'prefix, number')
-    end
-
-    def ensure_index!(table, name, columns_sql)
-      ActiveRecord::Base.connection.execute(<<~SQL)
-        DO $$
-        BEGIN
-          IF NOT EXISTS (
-            SELECT 1
-            FROM pg_class c
-            JOIN pg_namespace n ON n.oid = c.relnamespace
-            WHERE c.relkind='i'
-              AND c.relname='#{name}'
-              AND n.nspname='#{SCHEMA}'
-          ) THEN
-            EXECUTE 'CREATE INDEX #{name} ON #{qualified(table)} (#{columns_sql})';
-          END IF;
-        END;
-        $$;
-      SQL
     end
 
     def qualified(name)
