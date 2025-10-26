@@ -1,0 +1,15 @@
+# Read about fixtures at http://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  snapshot: one
+  node: one
+  partition: one
+  state: MyString
+  has_reason: false
+
+two:
+  snapshot: two
+  node: two
+  partition: two
+  state: MyString
+  has_reason: false

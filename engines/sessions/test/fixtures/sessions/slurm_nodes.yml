@@ -1,0 +1,11 @@
+# Read about fixtures at http://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  hostname: MyText
+  prefix: MyText
+  number: 1
+
+two:
+  hostname: MyText
+  prefix: MyText
+  number: 1

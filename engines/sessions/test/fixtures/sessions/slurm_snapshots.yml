@@ -1,0 +1,13 @@
+# Read about fixtures at http://api.rubyonrails.org/classes/ActiveRecord/FixtureSet.html
+
+one:
+  captured_at: 2025-10-26 03:55:35
+  source_cmd: MyText
+  raw_text: MyText
+  parser_version: MyText
+
+two:
+  captured_at: 2025-10-26 03:55:35
+  source_cmd: MyText
+  raw_text: MyText
+  parser_version: MyText
