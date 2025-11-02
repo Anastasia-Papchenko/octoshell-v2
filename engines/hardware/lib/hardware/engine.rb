@@ -3,3 +3,4 @@ module Hardware
     isolate_namespace Hardware
   end
 end
+

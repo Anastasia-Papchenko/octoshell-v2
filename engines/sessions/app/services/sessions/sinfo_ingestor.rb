@@ -1,6 +1,11 @@
 module Sessions
   class SinfoIngestor
-    SCHEMA = (ENV['PG_SCHEMA'].presence || 'octo').freeze
+    # Таблицы из engines/hardware/db/migrate/*
+    TABLE_SNAPSHOTS      = 'hardware_slurm_snapshots'.freeze
+    TABLE_PARTITIONS     = 'hardware_slurm_partitions'.freeze
+    TABLE_NODES          = 'hardware_slurm_nodes'.freeze
+    TABLE_NODE_SNAPSHOTS = 'hardware_slurm_node_snapshots'.freeze
+
     STATES = %w[alloc idle comp drain drng down maint reserved mix].freeze
 
     def initialize(raw_text:, source_cmd: 'sinfo -a', parser_version: 'v1', quiet: false, **_)
@@ -39,11 +44,10 @@ module Sessions
           rows_written = bulk_upsert_node_states(rows)
 
           {
-            snapshot_id: snapshot_id,
-            nodes_total: hostnames.size,
+            snapshot_id:  snapshot_id,
+            nodes_total:  hostnames.size,
             rows_written: rows_written,
-            partitions: part_id.size,
-            schema: SCHEMA
+            partitions:   part_id.size
           }
         end
       end
@@ -71,19 +75,11 @@ module Sessions
       ActiveRecord::Base.connection_pool.with_connection { yield }
     end
 
-    def qualified(name)
-      %("#{SCHEMA}".#{name})
-    end
-
-    def quoted_ident(name)
-      %("#{name}")
-    end
-
-
     def insert_snapshot!
       sql = <<~SQL
-        INSERT INTO #{qualified('slurm_snapshots')} (captured_at, source_cmd, raw_text, parser_version)
-        VALUES (NOW(), $1, $2, $3)
+        INSERT INTO #{TABLE_SNAPSHOTS}
+          (captured_at, source_cmd, raw_text, parser_version, created_at, updated_at)
+        VALUES (NOW(), $1, $2, $3, NOW(), NOW())
         RETURNING id
       SQL
       res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', [
@@ -104,14 +100,17 @@ module Sessions
         binds  = []
         chunk.each_with_index do |name, i|
           tl = limits[name]
-          values << "($#{i*2+1}, $#{i*2+2})"
+          base = i * 2
+          values << "($#{base+1}, $#{base+2}, NOW(), NOW())"
           binds << bind_str(name) << bind_str(tl)
         end
 
         sql = <<~SQL
-          INSERT INTO #{qualified('slurm_partitions')} (name, time_limit)
+          INSERT INTO #{TABLE_PARTITIONS} (name, time_limit, created_at, updated_at)
           VALUES #{values.join(',')}
-          ON CONFLICT (name) DO UPDATE SET time_limit = EXCLUDED.time_limit
+          ON CONFLICT (name) DO UPDATE
+            SET time_limit = EXCLUDED.time_limit,
+                updated_at = EXCLUDED.updated_at
           RETURNING id, name
         SQL
         res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', binds)
@@ -127,15 +126,18 @@ module Sessions
         binds  = []
         chunk.each_with_index do |hn, i|
           prefix, number = split_prefix_number(hn)
-          values << "($#{i*3+1}, $#{i*3+2}, $#{i*3+3})"
+          base = i * 3
+          values << "($#{base+1}, $#{base+2}, $#{base+3}, NOW(), NOW())"
           binds << bind_str(hn) << bind_str(prefix) << bind_int(number)
         end
 
         sql = <<~SQL
-          INSERT INTO #{qualified('slurm_nodes')} (hostname, prefix, number)
+          INSERT INTO #{TABLE_NODES} (hostname, prefix, number, created_at, updated_at)
           VALUES #{values.join(',')}
           ON CONFLICT (hostname) DO UPDATE
-            SET prefix = EXCLUDED.prefix, number = EXCLUDED.number
+            SET prefix    = EXCLUDED.prefix,
+                number    = EXCLUDED.number,
+                updated_at = EXCLUDED.updated_at
           RETURNING id, hostname
         SQL
         res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', binds)
@@ -153,19 +155,20 @@ module Sessions
         binds  = []
         chunk.each_with_index do |(snap_id, node_id, part_id, state, has_reason), i|
           base = i * 5
-          values << "($#{base+1}, $#{base+2}, $#{base+3}, $#{base+4}::#{qualified('slurm_node_state')}, $#{base+5})"
+          values << "($#{base+1}, $#{base+2}, $#{base+3}, $#{base+4}, $#{base+5}, NOW(), NOW())"
           binds  << bind_int(snap_id) << bind_int(node_id) << bind_int(part_id) \
                   << bind_str(state)  << bind_bool(has_reason)
         end
 
         sql = <<~SQL
-          INSERT INTO #{qualified('slurm_node_snapshot')}
-            (snapshot_id, node_id, partition_id, state, has_reason)
+          INSERT INTO #{TABLE_NODE_SNAPSHOTS}
+            (slurm_snapshot_id, slurm_node_id, slurm_partition_id, state, has_reason, created_at, updated_at)
           VALUES #{values.join(',')}
-          ON CONFLICT (snapshot_id, node_id) DO UPDATE
-            SET partition_id = EXCLUDED.partition_id,
-                state        = EXCLUDED.state,
-                has_reason   = EXCLUDED.has_reason
+          ON CONFLICT (slurm_snapshot_id, slurm_node_id) DO UPDATE
+            SET slurm_partition_id = EXCLUDED.slurm_partition_id,
+                state              = EXCLUDED.state,
+                has_reason         = EXCLUDED.has_reason,
+                updated_at         = EXCLUDED.updated_at
         SQL
         ActiveRecord::Base.connection.exec_query(sql, 'SQL', binds)
         count += chunk.size
