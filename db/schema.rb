@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 2025_11_02_160662) do
+ActiveRecord::Schema.define(version: 2025_11_11_181315) do
 
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
@@ -683,36 +683,6 @@ ActiveRecord::Schema.define(version: 2025_11_02_160662) do
     t.index ["research_area_id"], name: "ira_on_ira_per_projects"
   end
 
-  create_table "core_slurm_node_snapshots", force: :cascade do |t|
-    t.integer "snapshot_id", null: false
-    t.integer "node_id", null: false
-    t.integer "partition_id", null: false
-    t.string "state", null: false
-    t.text "reason"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["partition_id", "state"], name: "index_core_slurm_node_snapshots_on_partition_id_and_state"
-    t.index ["snapshot_id", "node_id"], name: "index_core_slurm_node_snapshots_on_snapshot_id_and_node_id", unique: true
-  end
-
-  create_table "core_slurm_nodes", force: :cascade do |t|
-    t.integer "cluster_id", null: false
-    t.string "name", null: false
-    t.string "prefix"
-    t.integer "number"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["cluster_id", "name"], name: "index_core_slurm_nodes_on_cluster_id_and_name", unique: true
-  end
-
-  create_table "core_slurm_snapshots", force: :cascade do |t|
-    t.datetime "captured_at", null: false
-    t.text "raw_text", null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["captured_at"], name: "index_core_slurm_snapshots_on_captured_at"
-  end
-
   create_table "core_sureties", id: :serial, force: :cascade do |t|
     t.integer "project_id"
     t.string "state"
@@ -791,97 +761,69 @@ ActiveRecord::Schema.define(version: 2025_11_02_160662) do
     t.datetime "updated_at"
   end
 
-  create_table "hardware_items", id: :serial, force: :cascade do |t|
-    t.string "name_ru"
-    t.string "name_en"
-    t.text "description_ru"
-    t.text "description_en"
-    t.integer "lock_version"
-    t.integer "kind_id"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-  end
-
-  create_table "hardware_items_states", id: :serial, force: :cascade do |t|
-    t.integer "item_id"
-    t.integer "state_id"
-    t.text "reason_en"
-    t.text "reason_ru"
-    t.text "description_en"
-    t.text "description_ru"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-  end
-
-  create_table "hardware_kinds", id: :serial, force: :cascade do |t|
-    t.string "name_ru"
-    t.string "name_en"
-    t.text "description_ru"
-    t.text "description_en"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-  end
-
-  create_table "hardware_slurm_node_snapshots", force: :cascade do |t|
+  create_table "hardware_slurm_node_states", force: :cascade do |t|
+    t.bigint "system_id", null: false
     t.bigint "slurm_snapshot_id", null: false
     t.bigint "slurm_node_id", null: false
     t.bigint "slurm_partition_id", null: false
     t.string "state", null: false
     t.string "substate"
     t.boolean "has_reason", default: false, null: false
+    t.datetime "valid_from", null: false
+    t.datetime "valid_to"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.index ["slurm_node_id"], name: "index_hardware_slurm_node_snapshots_on_slurm_node_id"
-    t.index ["slurm_partition_id", "state"], name: "idx_hsns_partition_state"
-    t.index ["slurm_partition_id"], name: "index_hardware_slurm_node_snapshots_on_slurm_partition_id"
-    t.index ["slurm_snapshot_id", "slurm_node_id"], name: "idx_hsns_snapshot_node", unique: true
-    t.index ["slurm_snapshot_id"], name: "index_hardware_slurm_node_snapshots_on_slurm_snapshot_id"
+    t.index ["slurm_node_id", "valid_from"], name: "index_node_states_on_node_id_and_valid_from"
+    t.index ["slurm_node_id", "valid_to"], name: "index_node_states_on_node_id_and_valid_to"
+    t.index ["slurm_node_id"], name: "index_hardware_slurm_node_states_on_slurm_node_id"
+    t.index ["slurm_node_id"], name: "index_node_states_current_on_node_id", where: "(valid_to IS NULL)"
+    t.index ["slurm_partition_id"], name: "index_hardware_slurm_node_states_on_slurm_partition_id"
+    t.index ["slurm_snapshot_id", "slurm_node_id"], name: "uniq_node_state_per_snapshot", unique: true
+    t.index ["slurm_snapshot_id"], name: "index_hardware_slurm_node_states_on_slurm_snapshot_id"
+    t.index ["system_id"], name: "index_hardware_slurm_node_states_on_system_id"
   end
 
   create_table "hardware_slurm_nodes", force: :cascade do |t|
+    t.bigint "system_id", null: false
     t.string "hostname", null: false
     t.string "prefix", null: false
-    t.integer "number"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.index ["hostname"], name: "index_hardware_slurm_nodes_on_hostname", unique: true
-    t.index ["prefix", "number"], name: "index_hardware_slurm_nodes_on_prefix_and_number"
+    t.index ["system_id", "hostname"], name: "index_slurm_nodes_on_system_id_and_hostname", unique: true
+    t.index ["system_id"], name: "index_hardware_slurm_nodes_on_system_id"
   end
 
   create_table "hardware_slurm_partitions", force: :cascade do |t|
+    t.bigint "system_id", null: false
     t.string "name", null: false
     t.string "time_limit"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.index ["name"], name: "index_hardware_slurm_partitions_on_name", unique: true
+    t.index ["system_id", "name"], name: "index_slurm_partitions_on_system_id_and_name", unique: true
+    t.index ["system_id"], name: "index_hardware_slurm_partitions_on_system_id"
   end
 
   create_table "hardware_slurm_snapshots", force: :cascade do |t|
+    t.bigint "system_id", null: false
     t.datetime "captured_at", null: false
-    t.string "source_cmd", default: "sinfo -a", null: false
-    t.string "parser_version", default: "v1", null: false
+    t.string "source_cmd", null: false
+    t.string "parser_version", null: false
     t.text "raw_text", null: false
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-    t.index ["captured_at"], name: "index_hardware_slurm_snapshots_on_captured_at"
+    t.index ["system_id", "captured_at"], name: "index_slurm_snapshots_on_system_id_and_captured_at"
+    t.index ["system_id"], name: "index_hardware_slurm_snapshots_on_system_id"
   end
 
-  create_table "hardware_states", id: :serial, force: :cascade do |t|
-    t.string "name_ru"
-    t.string "name_en"
-    t.text "description_ru"
-    t.text "description_en"
-    t.integer "lock_version"
-    t.integer "kind_id"
+  create_table "hardware_slurm_systems", force: :cascade do |t|
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.string "timezone"
+    t.string "sinfo_cmd"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
-  end
-
-  create_table "hardware_states_links", id: :serial, force: :cascade do |t|
-    t.integer "from_id"
-    t.integer "to_id"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
+    t.index ["name"], name: "index_hardware_slurm_systems_on_name", unique: true
+    t.index ["slug"], name: "index_hardware_slurm_systems_on_slug", unique: true
   end
 
   create_table "jobstat_data_types", id: :serial, force: :cascade do |t|
@@ -1481,8 +1423,12 @@ ActiveRecord::Schema.define(version: 2025_11_02_160662) do
   end
 
   add_foreign_key "core_bot_links", "users"
-  add_foreign_key "hardware_slurm_node_snapshots", "hardware_slurm_nodes", column: "slurm_node_id"
-  add_foreign_key "hardware_slurm_node_snapshots", "hardware_slurm_partitions", column: "slurm_partition_id"
-  add_foreign_key "hardware_slurm_node_snapshots", "hardware_slurm_snapshots", column: "slurm_snapshot_id"
+  add_foreign_key "hardware_slurm_node_states", "hardware_slurm_nodes", column: "slurm_node_id"
+  add_foreign_key "hardware_slurm_node_states", "hardware_slurm_partitions", column: "slurm_partition_id"
+  add_foreign_key "hardware_slurm_node_states", "hardware_slurm_snapshots", column: "slurm_snapshot_id"
+  add_foreign_key "hardware_slurm_node_states", "hardware_slurm_systems", column: "system_id"
+  add_foreign_key "hardware_slurm_nodes", "hardware_slurm_systems", column: "system_id"
+  add_foreign_key "hardware_slurm_partitions", "hardware_slurm_systems", column: "system_id"
+  add_foreign_key "hardware_slurm_snapshots", "hardware_slurm_systems", column: "system_id"
   add_foreign_key "support_field_values", "support_topics_fields", column: "topics_field_id"
 end

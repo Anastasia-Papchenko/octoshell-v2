@@ -1,18 +1,24 @@
+# frozen_string_literal: true
+require "set"
+
 module Sessions
   class SinfoIngestor
-    # Таблицы из engines/hardware/db/migrate/*
+    TABLE_SYSTEMS        = 'hardware_slurm_systems'.freeze
     TABLE_SNAPSHOTS      = 'hardware_slurm_snapshots'.freeze
     TABLE_PARTITIONS     = 'hardware_slurm_partitions'.freeze
     TABLE_NODES          = 'hardware_slurm_nodes'.freeze
-    TABLE_NODE_SNAPSHOTS = 'hardware_slurm_node_snapshots'.freeze
+    TABLE_NODE_STATES    = 'hardware_slurm_node_states'.freeze
 
     STATES = %w[alloc idle comp drain drng down maint reserved mix].freeze
 
-    def initialize(raw_text:, source_cmd: 'sinfo -a', parser_version: 'v1', quiet: false, **_)
-      @raw = raw_text.to_s
-      @source_cmd = source_cmd
+    def initialize(raw_text:, source_cmd: 'sinfo -a', parser_version: 'v1',
+                   quiet: false, system_slug: 'default', system_id: nil, **_)
+      @raw            = raw_text.to_s
+      @source_cmd     = source_cmd
       @parser_version = parser_version
-      @quiet = quiet
+      @quiet          = quiet
+      @system_slug    = system_slug
+      @system_id      = system_id
     end
 
     def call
@@ -20,9 +26,10 @@ module Sessions
 
       with_schema_context do
         with_silenced_ar do
-          snapshot_id = insert_snapshot!
+          @system_id ||= ensure_system!(@system_slug)
 
-          parsed_lines    = parse_table_lines(@raw)
+          snapshot_id    = insert_snapshot!
+          parsed_lines   = parse_table_lines(@raw)
           partition_names = parsed_lines.map { |h| h[:partition] }.to_set
           hostnames       = parsed_lines.flat_map { |h| h[:hostnames] }.to_set
 
@@ -55,11 +62,26 @@ module Sessions
 
     private
 
+    def ensure_system!(slug)
+      sql = <<~SQL
+        INSERT INTO #{TABLE_SYSTEMS} (name, slug, created_at, updated_at)
+        VALUES ($1, $2, NOW(), NOW())
+        ON CONFLICT (slug) DO UPDATE
+          SET updated_at = EXCLUDED.updated_at
+        RETURNING id
+      SQL
+      res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', [
+        bind_str("Slurm #{slug}"),
+        bind_str(slug)
+      ])
+      res.rows.first.first
+    end
+
     def with_silenced_ar
       return yield unless @quiet
       ar_logger  = ActiveRecord::Base.logger
       app_logger = defined?(Rails) ? Rails.logger : nil
-      old_ar = ar_logger&.level
+      old_ar  = ar_logger&.level
       old_app = app_logger&.level
       begin
         ar_logger.level  = Logger::WARN if ar_logger
@@ -78,11 +100,12 @@ module Sessions
     def insert_snapshot!
       sql = <<~SQL
         INSERT INTO #{TABLE_SNAPSHOTS}
-          (captured_at, source_cmd, raw_text, parser_version, created_at, updated_at)
-        VALUES (NOW(), $1, $2, $3, NOW(), NOW())
+          (system_id, captured_at, source_cmd, raw_text, parser_version, created_at, updated_at)
+        VALUES ($1, NOW(), $2, $3, $4, NOW(), NOW())
         RETURNING id
       SQL
       res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', [
+        bind_int(@system_id),
         bind_str(@source_cmd),
         bind_str(@raw),
         bind_str(@parser_version)
@@ -90,61 +113,101 @@ module Sessions
       res.rows.first.first
     end
 
-    def upsert_partitions(partition_names, parsed_lines)
-      limits = {}
-      parsed_lines.each { |h| limits[h[:partition]] ||= h[:timelimit] }
+    # ---------- helpers for schema introspection ----------
 
-      map = {}
-      partition_names.each_slice(100) do |chunk|
-        values = []
-        binds  = []
-        chunk.each_with_index do |name, i|
-          tl = limits[name]
-          base = i * 2
-          values << "($#{base+1}, $#{base+2}, NOW(), NOW())"
-          binds << bind_str(name) << bind_str(tl)
-        end
-
-        sql = <<~SQL
-          INSERT INTO #{TABLE_PARTITIONS} (name, time_limit, created_at, updated_at)
-          VALUES #{values.join(',')}
-          ON CONFLICT (name) DO UPDATE
-            SET time_limit = EXCLUDED.time_limit,
-                updated_at = EXCLUDED.updated_at
-          RETURNING id, name
-        SQL
-        res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', binds)
-        res.rows.each { |(id, name)| map[name] = id }
-      end
-      map
+    def column_exists_in_db?(table, column)
+      ActiveRecord::Base.connection.columns(table).any? { |c| c.name == column.to_s }
     end
 
-    def upsert_nodes(hostnames)
-      map = {}
-      hostnames.each_slice(500) do |chunk|
-        values = []
-        binds  = []
-        chunk.each_with_index do |hn, i|
-          prefix, number = split_prefix_number(hn)
-          base = i * 3
-          values << "($#{base+1}, $#{base+2}, $#{base+3}, NOW(), NOW())"
-          binds << bind_str(hn) << bind_str(prefix) << bind_int(number)
-        end
+    # ---------- UPSERTS ----------
 
-        sql = <<~SQL
-          INSERT INTO #{TABLE_NODES} (hostname, prefix, number, created_at, updated_at)
-          VALUES #{values.join(',')}
-          ON CONFLICT (hostname) DO UPDATE
-            SET prefix    = EXCLUDED.prefix,
-                number    = EXCLUDED.number,
-                updated_at = EXCLUDED.updated_at
-          RETURNING id, hostname
-        SQL
-        res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', binds)
-        res.rows.each { |(id, hostname)| map[hostname] = id }
+   def upsert_partitions(partition_names, parsed_lines)
+    has_time_limit = column_exists_in_db?(TABLE_PARTITIONS, :time_limit)
+
+    limits = {}
+    parsed_lines.each { |h| limits[h[:partition]] ||= h[:timelimit] }
+
+    map = {}
+    partition_names.each_slice(100) do |chunk|
+      values = []
+      binds  = []
+
+      stride = has_time_limit ? 3 : 2
+      chunk.each_with_index do |name, i|
+        tl   = limits[name]
+        base = i * stride
+        # system_id, name, [time_limit], created_at, updated_at
+        values << "($#{base+1}, $#{base+2}#{has_time_limit ? ", $#{base+3}" : ""}, NOW(), NOW())"
+        binds  << bind_int(@system_id) << bind_str(name)
+        binds  << bind_str(tl) if has_time_limit
       end
-      map
+
+      cols_arr = %w[system_id name]
+      cols_arr << 'time_limit' if has_time_limit
+      cols_arr += %w[created_at updated_at]
+      cols = cols_arr.join(', ')
+
+      set_clauses = []
+      set_clauses << "time_limit = EXCLUDED.time_limit" if has_time_limit
+      set_clauses << "updated_at = EXCLUDED.updated_at"
+
+      sql = <<~SQL
+        INSERT INTO #{TABLE_PARTITIONS} (#{cols})
+        VALUES #{values.join(',')}
+        ON CONFLICT (system_id, name) DO UPDATE
+          SET #{set_clauses.join(', ')}
+        RETURNING id, name
+      SQL
+
+      res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', binds)
+      res.rows.each { |(id, name)| map[name] = id }
     end
+
+    map
+  end
+
+
+  def upsert_nodes(hostnames)
+    has_number = column_exists_in_db?(TABLE_NODES, :number)
+
+    map = {}
+    hostnames.each_slice(500) do |chunk|
+      values = []
+      binds  = []
+
+      stride = has_number ? 4 : 3
+      chunk.each_with_index do |hn, i|
+        prefix, number = split_prefix_number(hn)
+        base = i * stride
+        # system_id, hostname, prefix, [number], created_at, updated_at
+        values << "($#{base+1}, $#{base+2}, $#{base+3}#{has_number ? ", $#{base+4}" : ""}, NOW(), NOW())"
+        binds  << bind_int(@system_id) << bind_str(hn) << bind_str(prefix)
+        binds  << bind_int(number) if has_number
+      end
+
+      cols_arr = %w[system_id hostname prefix]
+      cols_arr << 'number' if has_number
+      cols_arr += %w[created_at updated_at]
+      cols = cols_arr.join(', ')
+
+      set_clauses = ["prefix = EXCLUDED.prefix"]
+      set_clauses << "number = EXCLUDED.number" if has_number
+      set_clauses << "updated_at = EXCLUDED.updated_at"
+
+      sql = <<~SQL
+        INSERT INTO #{TABLE_NODES} (#{cols})
+        VALUES #{values.join(',')}
+        ON CONFLICT (system_id, hostname) DO UPDATE
+          SET #{set_clauses.join(', ')}
+        RETURNING id, hostname
+      SQL
+
+      res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', binds)
+      res.rows.each { |(id, hostname)| map[hostname] = id }
+    end
+    map
+  end
+
 
     def bulk_upsert_node_states(rows)
       return 0 if rows.empty?
@@ -154,15 +217,16 @@ module Sessions
         values = []
         binds  = []
         chunk.each_with_index do |(snap_id, node_id, part_id, state, has_reason), i|
-          base = i * 5
-          values << "($#{base+1}, $#{base+2}, $#{base+3}, $#{base+4}, $#{base+5}, NOW(), NOW())"
-          binds  << bind_int(snap_id) << bind_int(node_id) << bind_int(part_id) \
-                  << bind_str(state)  << bind_bool(has_reason)
+          base = i * 6
+          values << "($#{base+1}, $#{base+2}, $#{base+3}, $#{base+4}, $#{base+5}, NULL, $#{base+6}, NOW(), NULL, NOW(), NOW())"
+          binds  << bind_int(@system_id) << bind_int(snap_id) << bind_int(node_id) \
+                  << bind_int(part_id)   << bind_str(state)   << bind_bool(has_reason)
         end
 
         sql = <<~SQL
-          INSERT INTO #{TABLE_NODE_SNAPSHOTS}
-            (slurm_snapshot_id, slurm_node_id, slurm_partition_id, state, has_reason, created_at, updated_at)
+          INSERT INTO #{TABLE_NODE_STATES}
+            (system_id, slurm_snapshot_id, slurm_node_id, slurm_partition_id,
+             state, substate, has_reason, valid_from, valid_to, created_at, updated_at)
           VALUES #{values.join(',')}
           ON CONFLICT (slurm_snapshot_id, slurm_node_id) DO UPDATE
             SET slurm_partition_id = EXCLUDED.slurm_partition_id,
@@ -175,6 +239,8 @@ module Sessions
       end
       count
     end
+
+    # ---------- parsing ----------
 
     def parse_table_lines(raw)
       lines = raw.split("\n").map!(&:rstrip)
@@ -257,6 +323,8 @@ module Sessions
       number = m[2] ? m[2].to_i : nil
       [prefix, number]
     end
+
+    # ---------- binds ----------
 
     def bind_str(val)
       ActiveRecord::Relation::QueryAttribute.new(nil, val, ActiveRecord::Type::String.new)
