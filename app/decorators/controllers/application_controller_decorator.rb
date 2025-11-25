@@ -61,7 +61,12 @@ ApplicationController.class_eval do
     Face::MyMenu.user_submenu(self)
   end
 
+  # def admin_submenu_items
+  #   Face::MyMenu.admin_submenu(self)
+  # end
   def admin_submenu_items
-    Face::MyMenu.admin_submenu(self)
+    menu = Face::MyMenu.admin_submenu(self)
+    # menu.is_a?(Array) ? menu.compact : []
   end
+
 end

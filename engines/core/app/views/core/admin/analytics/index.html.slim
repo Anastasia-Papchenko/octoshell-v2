@@ -4,7 +4,7 @@
 .div.page-header
   h1 Аналитика
   = button_to('Обновить состояние узлов (sinfo)',
-              url_for(controller: '/sessions/admin/analytics', action: 'sinfo'),
+              url_for(controller: '/core/admin/analytics', action: 'sinfo'),
               method: :post,
               remote: true,
               form: { 'data-type': 'script' },

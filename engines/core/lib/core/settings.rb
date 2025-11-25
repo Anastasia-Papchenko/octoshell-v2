@@ -20,6 +20,12 @@ module Core
     add_ability(:manage, :geography, 'superadmins')
     add_controller_ability(:manage, :geography, 'admin/cities', 'admin/countries')
     add_ability(:manage,  :notices, 'superadmins')
+    add_controller_ability(:manage, :core, 'admin/core',
+                           'admin/surveys',
+                           'admin/report_submit_denial_reasons',
+                           'admin/projects', 'admin/analytics')
+    add_ability(:manage, :core, 'superadmins')
+
     add_routes do
       mount Core::Engine, :at => "/core"
     end
@@ -83,6 +89,8 @@ module Core
             add_item_if_may('clusters', t("admin_submenu.clusters"), core.admin_clusters_path, 'core/admin/clusters')
 
             add_item_if_may('cluster_logs', t("admin_submenu.cluster_logs"), core.admin_cluster_logs_path, 'core/admin/cluster_logs')
+
+            add_item_if_may('core_analytics', t("admin_submenu.analytics"), core.admin_analytics_path, 'core/admin/analytics')
 
             add_item_if_may('quota_kinds', t("admin_submenu.quota_kinds"), core.admin_quota_kinds_path, 'core/admin/quota_kinds')
 

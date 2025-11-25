@@ -5,10 +5,10 @@ module Sessions
     add_ability(:manage, :reports, 'superadmins', 'experts')
     add_controller_ability(:manage, :reports, 'admin/reports', 'admin/report_projects')
     add_ability(:manage, :sessions, 'superadmins', 'experts')
-    add_controller_ability(:manage, :sessions, 'admin/sessions',
-                           'admin/surveys',
-                           'admin/report_submit_denial_reasons',
-                           'admin/projects', 'admin/analytics')
+    # add_controller_ability(:manage, :sessions, 'admin/sessions',
+    #                        'admin/surveys',
+    #                        'admin/report_submit_denial_reasons',
+    #                        'admin/projects', 'admin/analytics')
 
     add_routes do
       mount Sessions::Engine, :at => "/sessions"
@@ -28,7 +28,7 @@ module Sessions
 
       Face::MyMenu.items_for(:admin_submenu) do
         add_item_if_may('reports', t("admin_submenu.reports"), sessions.admin_reports_path, 'sessions/admin/reports')
-        add_item_if_may('session_analytics', t("admin_submenu.analytics"), sessions.admin_analytics_path, 'sessions/admin/analytics')
+        # add_item_if_may('session_analytics', t("admin_submenu.analytics"), sessions.admin_analytics_path, 'sessions/admin/analytics')
         # add_item(
         #   'analytics',
         #   I18n.t('admin_submenu.analytics'),

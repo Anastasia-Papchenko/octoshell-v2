@@ -3,11 +3,13 @@ Core::Engine.routes.draw do
   resources :bot_links do
     get :generate
   end
+
   namespace :admin do
     resources :notices do
       get :hide
     end
     resources :members, only: :index
+
     resources :projects do
       member do
         get :activate
@@ -22,7 +24,6 @@ Core::Engine.routes.draw do
         get 'versions', to: 'project_versions#index'
         get :find_similar
         get :find_similar_by_members
-
       end
       collection do
         get :finder
@@ -58,11 +59,13 @@ Core::Engine.routes.draw do
         post :merge
       end
     end
-    resources :prepare_merge,only: [:index,:update,:edit] do
+
+    resources :prepare_merge, only: [:index, :update, :edit] do
       member do
         delete :destroy
       end
     end
+
     resources :organizations do
       member do
         get :index_for_organization
@@ -99,6 +102,10 @@ Core::Engine.routes.draw do
       get :block, on: :member
       get :reactivate, on: :member
     end
+
+    resources :analytics, only: [:index] do
+      post :sinfo, on: :collection
+    end
   end
 
   resources :notices do
@@ -107,6 +114,7 @@ Core::Engine.routes.draw do
       post :hide
     end
   end
+
 
   resources :credentials, only: [:new, :create] do
     put :deactivate

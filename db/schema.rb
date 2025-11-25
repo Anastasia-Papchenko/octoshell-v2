@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 2025_11_11_181315) do
+ActiveRecord::Schema.define(version: 2025_11_25_181315) do
 
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
@@ -328,6 +328,71 @@ ActiveRecord::Schema.define(version: 2025_11_11_181315) do
     t.index ["cluster_id"], name: "index_core_accesses_on_cluster_id"
     t.index ["project_id", "cluster_id"], name: "index_core_accesses_on_project_id_and_cluster_id", unique: true
     t.index ["project_id"], name: "index_core_accesses_on_project_id"
+  end
+
+  create_table "core_analytics_node_states", force: :cascade do |t|
+    t.bigint "system_id", null: false
+    t.bigint "snapshot_id", null: false
+    t.bigint "node_id", null: false
+    t.bigint "partition_id", null: false
+    t.string "state", null: false
+    t.string "substate"
+    t.boolean "has_reason", default: false, null: false
+    t.datetime "valid_from", null: false
+    t.datetime "valid_to"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["node_id", "valid_from"], name: "core_analytics_index_node_states_on_node_id_and_valid_from"
+    t.index ["node_id", "valid_to"], name: "core_analytics_index_node_states_on_node_id_and_valid_to"
+    t.index ["node_id"], name: "core_analytics_index_node_states_current_on_node_id", where: "(valid_to IS NULL)"
+    t.index ["node_id"], name: "index_core_analytics_node_states_on_node_id"
+    t.index ["partition_id"], name: "index_core_analytics_node_states_on_partition_id"
+    t.index ["snapshot_id", "node_id"], name: "core_analytics_uniq_node_state_per_snapshot", unique: true
+    t.index ["snapshot_id"], name: "index_core_analytics_node_states_on_snapshot_id"
+    t.index ["system_id"], name: "index_core_analytics_node_states_on_system_id"
+  end
+
+  create_table "core_analytics_nodes", force: :cascade do |t|
+    t.bigint "system_id", null: false
+    t.string "hostname", null: false
+    t.string "prefix", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["system_id", "hostname"], name: "index_core_analytics_nodes_on_system_id_and_hostname", unique: true
+    t.index ["system_id"], name: "index_core_analytics_nodes_on_system_id"
+  end
+
+  create_table "core_analytics_partitions", force: :cascade do |t|
+    t.bigint "system_id", null: false
+    t.string "name", null: false
+    t.string "time_limit"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["system_id", "name"], name: "index_core_analytics_partitions_on_system_id_and_name", unique: true
+    t.index ["system_id"], name: "index_core_analytics_partitions_on_system_id"
+  end
+
+  create_table "core_analytics_snapshots", force: :cascade do |t|
+    t.bigint "system_id", null: false
+    t.datetime "captured_at", null: false
+    t.string "source_cmd", null: false
+    t.string "parser_version", null: false
+    t.text "raw_text", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["system_id", "captured_at"], name: "index_core_analytics_snapshots_on_system_id_and_captured_at"
+    t.index ["system_id"], name: "index_core_analytics_snapshots_on_system_id"
+  end
+
+  create_table "core_analytics_systems", force: :cascade do |t|
+    t.string "name", null: false
+    t.string "slug", null: false
+    t.string "timezone"
+    t.string "sinfo_cmd"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["name"], name: "index_core_analytics_systems_on_name", unique: true
+    t.index ["slug"], name: "index_core_analytics_systems_on_slug", unique: true
   end
 
   create_table "core_bot_links", force: :cascade do |t|
@@ -759,71 +824,6 @@ ActiveRecord::Schema.define(version: 2025_11_11_181315) do
     t.boolean "system"
     t.datetime "created_at"
     t.datetime "updated_at"
-  end
-
-  create_table "hardware_slurm_node_states", force: :cascade do |t|
-    t.bigint "system_id", null: false
-    t.bigint "slurm_snapshot_id", null: false
-    t.bigint "slurm_node_id", null: false
-    t.bigint "slurm_partition_id", null: false
-    t.string "state", null: false
-    t.string "substate"
-    t.boolean "has_reason", default: false, null: false
-    t.datetime "valid_from", null: false
-    t.datetime "valid_to"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["slurm_node_id", "valid_from"], name: "index_node_states_on_node_id_and_valid_from"
-    t.index ["slurm_node_id", "valid_to"], name: "index_node_states_on_node_id_and_valid_to"
-    t.index ["slurm_node_id"], name: "index_hardware_slurm_node_states_on_slurm_node_id"
-    t.index ["slurm_node_id"], name: "index_node_states_current_on_node_id", where: "(valid_to IS NULL)"
-    t.index ["slurm_partition_id"], name: "index_hardware_slurm_node_states_on_slurm_partition_id"
-    t.index ["slurm_snapshot_id", "slurm_node_id"], name: "uniq_node_state_per_snapshot", unique: true
-    t.index ["slurm_snapshot_id"], name: "index_hardware_slurm_node_states_on_slurm_snapshot_id"
-    t.index ["system_id"], name: "index_hardware_slurm_node_states_on_system_id"
-  end
-
-  create_table "hardware_slurm_nodes", force: :cascade do |t|
-    t.bigint "system_id", null: false
-    t.string "hostname", null: false
-    t.string "prefix", null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["system_id", "hostname"], name: "index_slurm_nodes_on_system_id_and_hostname", unique: true
-    t.index ["system_id"], name: "index_hardware_slurm_nodes_on_system_id"
-  end
-
-  create_table "hardware_slurm_partitions", force: :cascade do |t|
-    t.bigint "system_id", null: false
-    t.string "name", null: false
-    t.string "time_limit"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["system_id", "name"], name: "index_slurm_partitions_on_system_id_and_name", unique: true
-    t.index ["system_id"], name: "index_hardware_slurm_partitions_on_system_id"
-  end
-
-  create_table "hardware_slurm_snapshots", force: :cascade do |t|
-    t.bigint "system_id", null: false
-    t.datetime "captured_at", null: false
-    t.string "source_cmd", null: false
-    t.string "parser_version", null: false
-    t.text "raw_text", null: false
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["system_id", "captured_at"], name: "index_slurm_snapshots_on_system_id_and_captured_at"
-    t.index ["system_id"], name: "index_hardware_slurm_snapshots_on_system_id"
-  end
-
-  create_table "hardware_slurm_systems", force: :cascade do |t|
-    t.string "name", null: false
-    t.string "slug", null: false
-    t.string "timezone"
-    t.string "sinfo_cmd"
-    t.datetime "created_at", null: false
-    t.datetime "updated_at", null: false
-    t.index ["name"], name: "index_hardware_slurm_systems_on_name", unique: true
-    t.index ["slug"], name: "index_hardware_slurm_systems_on_slug", unique: true
   end
 
   create_table "jobstat_data_types", id: :serial, force: :cascade do |t|
@@ -1422,13 +1422,13 @@ ActiveRecord::Schema.define(version: 2025_11_11_181315) do
     t.index ["url"], name: "index_wikiplus_pages_on_url", unique: true
   end
 
+  add_foreign_key "core_analytics_node_states", "core_analytics_nodes", column: "node_id"
+  add_foreign_key "core_analytics_node_states", "core_analytics_partitions", column: "partition_id"
+  add_foreign_key "core_analytics_node_states", "core_analytics_snapshots", column: "snapshot_id"
+  add_foreign_key "core_analytics_node_states", "core_analytics_systems", column: "system_id"
+  add_foreign_key "core_analytics_nodes", "core_analytics_systems", column: "system_id"
+  add_foreign_key "core_analytics_partitions", "core_analytics_systems", column: "system_id"
+  add_foreign_key "core_analytics_snapshots", "core_analytics_systems", column: "system_id"
   add_foreign_key "core_bot_links", "users"
-  add_foreign_key "hardware_slurm_node_states", "hardware_slurm_nodes", column: "slurm_node_id"
-  add_foreign_key "hardware_slurm_node_states", "hardware_slurm_partitions", column: "slurm_partition_id"
-  add_foreign_key "hardware_slurm_node_states", "hardware_slurm_snapshots", column: "slurm_snapshot_id"
-  add_foreign_key "hardware_slurm_node_states", "hardware_slurm_systems", column: "system_id"
-  add_foreign_key "hardware_slurm_nodes", "hardware_slurm_systems", column: "system_id"
-  add_foreign_key "hardware_slurm_partitions", "hardware_slurm_systems", column: "system_id"
-  add_foreign_key "hardware_slurm_snapshots", "hardware_slurm_systems", column: "system_id"
   add_foreign_key "support_field_values", "support_topics_fields", column: "topics_field_id"
 end

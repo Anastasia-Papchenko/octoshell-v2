@@ -1,7 +1,6 @@
 require "net/ssh"
-# require_dependency 'engines/sessions/app/services/sessions/admin/analytics/sinfo_fetcher.rb'
 
-module Sessions
+module Core
   class SinfoFetcher
     CMD = "bash -lc 'module add slurm && sinfo -a'"
 

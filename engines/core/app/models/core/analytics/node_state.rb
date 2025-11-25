@@ -1,15 +1,15 @@
-module Hardware
-  module Slurm
+module Core
+  module Analytics
     class NodeState < ApplicationRecord
-      self.table_name = 'hardware_slurm_node_states'
+      self.table_name = 'core_analytics_node_states'
 
       STATES    = %w[alloc idle comp drain drng down maint reserved mix].freeze
       SUBSTATES = %w[unknown maintenance pending draining].freeze
 
-      belongs_to :system,          class_name: 'Hardware::Slurm::System'
-      belongs_to :slurm_snapshot,  class_name: 'Hardware::Slurm::Snapshot'
-      belongs_to :slurm_node,      class_name: 'Hardware::Slurm::Node'
-      belongs_to :slurm_partition, class_name: 'Hardware::Slurm::Partition'
+      belongs_to :system,    class_name: 'Core::Analytics::System'
+      belongs_to :snapshot,  class_name: 'Core::Analytics::Snapshot'
+      belongs_to :node,      class_name: 'Core::Analytics::Node'
+      belongs_to :partition, class_name: 'Core::Analytics::Partition'
 
       validates :state, presence: true, inclusion: { in: STATES }
       validates :substate, allow_nil: true, inclusion: { in: SUBSTATES }

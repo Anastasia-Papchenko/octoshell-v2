@@ -1,32 +1,19 @@
-module Sessions
+module Core
   class Admin::AnalyticsController < Admin::ApplicationController
     skip_before_action :authorize_admins, only: [:index, :sinfo], raise: false
     before_action :require_analytics_access
     octo_use(:project_class, :core, 'Project')
 
     def index
-      @search = Report.includes([{ author: :profile }, { expert: :profile }, :session])
-                      .for_link(:project) { |r| r.includes(project: :research_areas) }
-                      .search(params[:q] || {})
+      @total_reports     = 0
+      @submitted_reports = 0
+      @assessing_reports = 0
+      @rejected_reports  = 0
 
-      if role?(:superadmin) || role?(:reregistrator) || role?(:admin) || can_read_reports?
-        @reports = @search.result(distinct: true)
-      elsif role?(:expert)
-        @reports = @search.result(distinct: true).where(expert_id: [nil, current_user.id])
-      else
-        @reports = Report.none
-      end
-
-      @total_reports     = @reports.count
-      @submitted_reports = @reports.where(state: 'submitted').count
-      @assessing_reports = @reports.where(state: 'assessing').count
-      @rejected_reports  = @reports.where(state: 'rejected').count
-
-      without_pagination :reports
     end
 
     def sinfo
-      fetcher = Sessions::SinfoFetcher.new(
+      fetcher = Core::SinfoFetcher.new(
         host: ENV.fetch("HPC_HOST", "188.44.52.12"),
         user: ENV.fetch("HPC_USER", "papchenko30_2363"),
         auth: { forward_agent: true }
@@ -34,7 +21,7 @@ module Sessions
       @sinfo_log = fetcher.call.to_s
 
       result = ActiveRecord::Base.transaction do
-        Sessions::SinfoIngestor.new(
+        Core::SinfoIngestor.new(
           raw_text: @sinfo_log,
           source_cmd: 'sinfo -a',
           parser_version: 'v1',
@@ -76,7 +63,7 @@ module Sessions
     def role?(name)
       return false unless current_user
 
-      sym = name.to_sym
+      sym  = name.to_sym
       pred = "#{sym}?".to_sym
       if current_user.respond_to?(pred)
         current_user.public_send(pred)
@@ -97,7 +84,12 @@ module Sessions
     end
 
     def require_analytics_access
-      allowed = role?(:superadmin) || role?(:reregistrator) || role?(:admin) || role?(:expert) || can_read_reports?
+      allowed = role?(:superadmin) ||
+                role?(:reregistrator) ||
+                role?(:admin) ||
+                role?(:expert) ||
+                can_read_reports?
+
       redirect_to main_app.admin_users_path, alert: 'Нет доступа к аналитике' unless allowed
     end
   end
