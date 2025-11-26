@@ -159,38 +159,88 @@ ul.nav.nav-tabs
                       - others = total_p - states['alloc'].to_i - states['idle'].to_i - states['down'].to_i
                       td = others
 
-    h2 История загрузки (последние снимки)
+        h2 История загрузки (последние снимки)
 
-    - if @latest_snapshots.blank?
-      p.text-muted Снимков ещё нет — выполните загрузку SINFO.
-    - else
-      table.table.table-striped.table-condensed
-        thead
-          tr
-            th Время снимка
-            th Система
-            th Всего записей
-            th alloc
-            th idle
-            th down
-            th другие
-        tbody
-          - @latest_snapshots.each do |snap|
-            - stats = @snapshot_stats[snap.id] || {}
-            - total = stats.values.sum
-            - alloc = stats['alloc'].to_i
-            - idle  = stats['idle'].to_i
-            - down  = stats['down'].to_i
-            - others = total - alloc - idle - down
-            tr
-              -# форматируем время, если I18n настроен
-              td = (defined?(l) ? l(snap.captured_at, format: :short) : snap.captured_at)
-              td = snap.system.name
-              td = total
-              td = alloc
-              td = idle
-              td = down
-              td = others
+        - if @latest_snapshots.blank?
+          p.text-muted Снимков ещё нет — выполните загрузку SINFO.
+        - else
+          table#snapshots_table.table.table-striped.table-condensed
+            thead
+              tr
+                th Время снимка
+                th Система
+                th Всего записей
+                th alloc
+                th idle
+                th down
+                th другие
+            tbody
+              - @latest_snapshots.each do |snap|
+                - stats = @snapshot_stats[snap.id] || {}
+                - total = stats.values.sum
+                - alloc = stats['alloc'].to_i
+                - idle  = stats['idle'].to_i
+                - down  = stats['down'].to_i
+                - others = total - alloc - idle - down
+                tr
+                  -# форматируем время, если I18n настроен
+                  td = (defined?(l) ? l(snap.captured_at, format: :short) : snap.captured_at)
+                  td = snap.system.name
+                  td = total
+                  td = alloc
+                  td = idle
+                  td = down
+                  td = others
+
+          - if @latest_snapshots.size > 5
+            .text-center style="margin-top: 10px;"
+              button#load_more_snapshots.btn.btn-default type="button"
+                | Показать ещё 5 снимков
+
+        / JS для показа только последних 5 строк и постепенной догрузки
+        javascript:
+          (function() {
+            function setupSnapshotsPagination() {
+              var table = document.getElementById('snapshots_table');
+              if (!table) { return; }
+
+              var rows  = table.querySelectorAll('tbody tr');
+              if (!rows.length) { return; }
+
+              var step    = 5;      // показываем/добавляем по 5
+              var visible = 0;
+
+              function updateVisibility() {
+                for (var i = 0; i < rows.length; i++) {
+                  rows[i].style.display = (i < visible) ? '' : 'none';
+                }
+
+                var btn = document.getElementById('load_more_snapshots');
+                if (!btn) { return; }
+
+                if (visible >= rows.length) {
+                  btn.style.display = 'none';
+                } else {
+                  btn.style.display = '';
+                }
+              }
+
+              visible = Math.min(step, rows.length);
+              updateVisibility();
+
+              var btn = document.getElementById('load_more_snapshots');
+              if (btn) {
+                btn.addEventListener('click', function() {
+                  visible = Math.min(visible + step, rows.length);
+                  updateVisibility();
+                });
+              }
+            }
+
+            document.addEventListener('DOMContentLoaded', setupSnapshotsPagination);
+            document.addEventListener('turbolinks:load', setupSnapshotsPagination);
+          })();
+
 
   .tab-pane#comments_tab
     .panel.panel-default
