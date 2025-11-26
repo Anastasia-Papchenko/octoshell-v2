@@ -10,183 +10,193 @@
               form: { 'data-type': 'script' },
               class: 'btn btn-primary')
 
+ul.nav.nav-tabs
+  li.active
+    a href="#analytics_tab" data-toggle="tab"
+      | Аналитика
+  li
+    a href="#comments_tab" data-toggle="tab"
+      | Комментарии администратора
 
-/ === Блок для вывода лога sinfo ===
-- shown = defined?(@sinfo_log) && @sinfo_log.present?
-.panel.panel-default id="sinfo_log_panel" style=("display: none" unless shown)
-  .panel-heading Лог sinfo
-  .panel-body
-    pre#sinfo_log style="max-height: 480px; overflow: auto; white-space: pre-wrap"
-      = shown ? @sinfo_log : ''
+.tab-content style="margin-top: 20px;"
+  .tab-pane.active#analytics_tab
 
-/ === Круговая диаграмма по текущим состояниям узлов ===
-h2 Текущая загрузка узлов (круговая диаграмма)
-
-- if @global_state_counts.blank?
-  p.text-muted Нет данных о текущих состояниях узлов. Нажмите «Обновить состояние узлов (sinfo)» выше.
-- else
-  / Подключаем Chart.js с CDN
-  = javascript_include_tag 'https://cdn.jsdelivr.net/npm/chart.js'
-
-  - labels = Core::Analytics::NodeState::STATES.select { |st| @global_state_counts[st].to_i > 0 }
-  - data   = labels.map { |st| @global_state_counts[st].to_i }
-
-  .row
-    .col-md-8.col-sm-12.col-md-offset-2
-      .chart-container style="max-width: 500px; margin: 30px auto 40px auto;"
-        canvas#states_pie_chart data-labels=labels.join(',') data-values=data.join(',') style="display:block; width:100%; height:auto;"
-
-
-  javascript:
-    (function() {
-      function renderStatesPieChart() {
-        var canvas = document.getElementById('states_pie_chart');
-        if (!canvas) { return; }
-        if (typeof Chart === 'undefined') { return; }
-
-        var labelsStr = canvas.getAttribute('data-labels');
-        var valuesStr = canvas.getAttribute('data-values');
-        if (!labelsStr || !valuesStr) { return; }
-
-        var labels = labelsStr.split(',');
-        var data   = valuesStr.split(',').map(function(v) {
-          return parseInt(v, 10) || 0;
-        });
-
-        var ctx = canvas.getContext('2d');
-
-        new Chart(ctx, {
-          type: 'pie',
-          data: {
-            labels: labels,
-            datasets: [{
-              data: data
-            }]
-          },
-          options: {
-            responsive: true,
-            plugins: {
-              legend: {
-                position: 'bottom'
-              },
-              title: {
-                display: false
-              }
-            }
-          }
-        });
-      }
-
-      document.addEventListener('DOMContentLoaded', renderStatesPieChart);
-      document.addEventListener('turbolinks:load', renderStatesPieChart);
-    })();
-
-
-
-
-/ === Дашборды по системам и партициям ===
-- if @systems.blank?
-  .alert.alert-info
-    | Пока нет данных об узлах. Нажмите кнопку «Обновить состояние узлов (sinfo)» выше.
-- else
-  - @systems.each do |system|
-    - stats = @system_stats[system.id] || {}
-    .panel.panel-info
-      .panel-heading
-        strong = system.name
-        |  (#{system.slug})
-        - if stats[:total_nodes].to_i > 0
-          span.pull-right
-            | Всего узлов: #{stats[:total_nodes]}
+    - shown = defined?(@sinfo_log) && @sinfo_log.present?
+    .panel.panel-default id="sinfo_log_panel" style=("display: none" unless shown)
+      .panel-heading Лог sinfo
       .panel-body
-        - total = stats[:total_nodes].to_f
-        - state_counts = stats[:states] || {}
-        - issues = stats[:issues].to_i
+        pre#sinfo_log style="max-height: 480px; overflow: auto; white-space: pre-wrap"
+          = shown ? @sinfo_log : ''
 
-        - if total.zero?
-          p.text-muted Нет данных о текущих состояниях узлов для этой системы.
-        - else
-          h4 Состояния узлов (текущий срез)
-          table.table.table-condensed.table-bordered
-            thead
-              tr
-                th Состояние
-                th Узлов
-                th Доля
-            tbody
-              - Core::Analytics::NodeState::STATES.each do |state|
-                - count = state_counts[state] || 0
-                - next if count.zero?
-                tr
-                  td = state
-                  td = count
-                  - percent = ((count / total) * 100).round(1)
-                  td = "#{percent} %"
+    h2 Текущая загрузка узлов (круговая диаграмма)
 
-          - if issues > 0
-            p
-              span.label.label-danger
-                | Узлов с флагом has_reason: #{issues}
-          - else
-            p.text-muted Нет узлов с флагом has_reason в текущем состоянии.
+    - if @global_state_counts.blank?
+      p.text-muted Нет данных о текущих состояниях узлов. Нажмите «Обновить состояние узлов (sinfo)» выше.
+    - else
+      / Подключаем Chart.js с CDN
+      = javascript_include_tag 'https://cdn.jsdelivr.net/npm/chart.js'
 
-        - partitions = @partition_stats[system.id] || {}
-        - if partitions.present?
-          hr
-          h4 Партиции
-          table.table.table-condensed.table-striped
-            thead
-              tr
-                th Партиция
-                th Всего узлов (по состояниям)
-                th alloc
-                th idle
-                th down
-                th другие
-            tbody
-              - partitions.each_value do |pstats|
-                - states = pstats[:states] || {}
-                - total_p = states.values.sum
-                tr
-                  td = pstats[:name]
-                  td = total_p
-                  td = states['alloc'].to_i
-                  td = states['idle'].to_i
-                  td = states['down'].to_i
-                  - others = total_p - states['alloc'].to_i - states['idle'].to_i - states['down'].to_i
-                  td = others
+      - labels = Core::Analytics::NodeState::STATES.select { |st| @global_state_counts[st].to_i > 0 }
+      - data   = labels.map { |st| @global_state_counts[st].to_i }
 
-/ === История: последние снимки ===
-h2 История загрузки (последние снимки)
+      .row
+        .col-md-8.col-sm-12.col-md-offset-2
+          .chart-container style="max-width: 500px; margin: 30px auto 40px auto;"
+            canvas#states_pie_chart data-labels=labels.join(',') data-values=data.join(',') style="display:block; width:100%; height:auto;"
 
-- if @latest_snapshots.blank?
-  p.text-muted Снимков ещё нет — выполните загрузку SINFO.
-- else
-  table.table.table-striped.table-condensed
-    thead
-      tr
-        th Время снимка
-        th Система
-        th Всего записей
-        th alloc
-        th idle
-        th down
-        th другие
-    tbody
-      - @latest_snapshots.each do |snap|
-        - stats = @snapshot_stats[snap.id] || {}
-        - total = stats.values.sum
-        - alloc = stats['alloc'].to_i
-        - idle  = stats['idle'].to_i
-        - down  = stats['down'].to_i
-        - others = total - alloc - idle - down
-        tr
-          -# форматируем время, если I18n настроен
-          td = (defined?(l) ? l(snap.captured_at, format: :short) : snap.captured_at)
-          td = snap.system.name
-          td = total
-          td = alloc
-          td = idle
-          td = down
-          td = others
+      javascript:
+        (function() {
+          function renderStatesPieChart() {
+            var canvas = document.getElementById('states_pie_chart');
+            if (!canvas) { return; }
+            if (typeof Chart === 'undefined') { return; }
 
+            var labelsStr = canvas.getAttribute('data-labels');
+            var valuesStr = canvas.getAttribute('data-values');
+            if (!labelsStr || !valuesStr) { return; }
+
+            var labels = labelsStr.split(',');
+            var data   = valuesStr.split(',').map(function(v) {
+              return parseInt(v, 10) || 0;
+            });
+
+            var ctx = canvas.getContext('2d');
+
+            new Chart(ctx, {
+              type: 'pie',
+              data: {
+                labels: labels,
+                datasets: [{
+                  data: data
+                }]
+              },
+              options: {
+                responsive: true,
+                plugins: {
+                  legend: {
+                    position: 'bottom'
+                  },
+                  title: {
+                    display: false
+                  }
+                }
+              }
+            });
+          }
+
+          document.addEventListener('DOMContentLoaded', renderStatesPieChart);
+          document.addEventListener('turbolinks:load', renderStatesPieChart);
+        })();
+
+    - if @systems.blank?
+      .alert.alert-info
+        | Пока нет данных об узлах. Нажмите кнопку «Обновить состояние узлов (sinfo)» выше.
+    - else
+      - @systems.each do |system|
+        - stats = @system_stats[system.id] || {}
+        .panel.panel-info
+          .panel-heading
+            strong = system.name
+            |  (#{system.slug})
+            - if stats[:total_nodes].to_i > 0
+              span.pull-right
+                | Всего узлов: #{stats[:total_nodes]}
+          .panel-body
+            - total = stats[:total_nodes].to_f
+            - state_counts = stats[:states] || {}
+            - issues = stats[:issues].to_i
+
+            - if total.zero?
+              p.text-muted Нет данных о текущих состояниях узлов для этой системы.
+            - else
+              h4 Состояния узлов (текущий срез)
+              table.table.table-condensed.table-bordered
+                thead
+                  tr
+                    th Состояние
+                    th Узлов
+                    th Доля
+                tbody
+                  - Core::Analytics::NodeState::STATES.each do |state|
+                    - count = state_counts[state] || 0
+                    - next if count.zero?
+                    tr
+                      td = state
+                      td = count
+                      - percent = ((count / total) * 100).round(1)
+                      td = "#{percent} %"
+
+              - if issues > 0
+                p
+                  span.label.label-danger
+                    | Узлов с флагом has_reason: #{issues}
+              - else
+                p.text-muted Нет узлов с флагом has_reason в текущем состоянии.
+
+            - partitions = @partition_stats[system.id] || {}
+            - if partitions.present?
+              hr
+              h4 Партиции
+              table.table.table-condensed.table-striped
+                thead
+                  tr
+                    th Партиция
+                    th Всего узлов (по состояниям)
+                    th alloc
+                    th idle
+                    th down
+                    th другие
+                tbody
+                  - partitions.each_value do |pstats|
+                    - states = pstats[:states] || {}
+                    - total_p = states.values.sum
+                    tr
+                      td = pstats[:name]
+                      td = total_p
+                      td = states['alloc'].to_i
+                      td = states['idle'].to_i
+                      td = states['down'].to_i
+                      - others = total_p - states['alloc'].to_i - states['idle'].to_i - states['down'].to_i
+                      td = others
+
+    h2 История загрузки (последние снимки)
+
+    - if @latest_snapshots.blank?
+      p.text-muted Снимков ещё нет — выполните загрузку SINFO.
+    - else
+      table.table.table-striped.table-condensed
+        thead
+          tr
+            th Время снимка
+            th Система
+            th Всего записей
+            th alloc
+            th idle
+            th down
+            th другие
+        tbody
+          - @latest_snapshots.each do |snap|
+            - stats = @snapshot_stats[snap.id] || {}
+            - total = stats.values.sum
+            - alloc = stats['alloc'].to_i
+            - idle  = stats['idle'].to_i
+            - down  = stats['down'].to_i
+            - others = total - alloc - idle - down
+            tr
+              -# форматируем время, если I18n настроен
+              td = (defined?(l) ? l(snap.captured_at, format: :short) : snap.captured_at)
+              td = snap.system.name
+              td = total
+              td = alloc
+              td = idle
+              td = down
+              td = others
+
+  .tab-pane#comments_tab
+    .panel.panel-default
+      .panel-heading Комментарии администратора
+      .panel-body
+        p
+          | Здесь позже появится форма, куда администратор сможет вносить свои комментарии по состоянию узлов.
+        p.text-muted
+          | Пока это просто заглушка для проверки работы вкладок.
