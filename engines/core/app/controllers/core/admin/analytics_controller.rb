@@ -1,8 +1,10 @@
 module Core
   class Admin::AnalyticsController < Admin::ApplicationController
-    skip_before_action :authorize_admins, only: [:index, :sinfo], raise: false
+    skip_before_action :authorize_admins, only: [:index, :sinfo, :create_comment], raise: false
     before_action :require_analytics_access
     octo_use(:project_class, :core, 'Project')
+
+    before_action :prepare_comments, only: [:index]
 
     def index
       @total_reports     = 0
@@ -69,6 +71,12 @@ module Core
           @snapshot_stats[snap_id][state] = count
         end
       end
+
+      @comment ||= Core::Comments::Comment.new
+      @recent_comments = Core::Comments::Comment.order(valid_from: :desc, created_at: :desc)
+                                                
+
+      @active_tab ||= 'analytics'
     end
 
 
@@ -118,7 +126,64 @@ module Core
       end
     end
 
+    def create_comment
+      if request.get?
+        index
+        @active_tab = 'comments'
+        render :index
+      else
+        @comment = Core::Comments::Comment.new(comment_params)
+
+        comments_user = Core::Comments::User.find_or_initialize_by(email: current_user.email)
+
+        if comments_user.new_record?
+          comments_user.name =
+            current_user.try(:full_name) ||
+            current_user.try(:name) ||
+            current_user.email
+
+          comments_user.save!
+        end
+
+        @comment.author = comments_user
+
+        if @comment.save
+          flash[:notice] = 'Комментарий сохранён.'
+          redirect_to url_for(controller: '/core/admin/analytics', action: :create_comment)
+        else
+          flash.now[:alert] = 'Не удалось сохранить комментарий.'
+          index
+          @active_tab = 'comments'
+          render :index
+        end
+      end
+    end
+
+
     private
+
+
+    def comment_params
+      key =
+        if params[:comment].present?
+          :comment
+        elsif params[:comments_comment].present?
+          :comments_comment
+        else
+          raise ActionController::ParameterMissing, :comment
+        end
+
+      params.require(key).permit(
+        :title,
+        :body,
+        :valid_from,
+        :valid_to,
+        :severity,
+        :pinned,
+        :system_id,
+        tag_keys: []
+      )
+    end
 
     def role?(name)
       return false unless current_user
@@ -152,5 +217,14 @@ module Core
 
       redirect_to main_app.admin_users_path, alert: 'Нет доступа к аналитике' unless allowed
     end
+
+    def prepare_comments
+      @comment = Core::Comments::Comment.new(valid_from: Time.current)
+      @recent_comments = Core::Comments::Comment
+                           .includes(:author)
+                           .recent_first
+                           .limit(20)
+    end
+
   end
 end

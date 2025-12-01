@@ -104,8 +104,12 @@ Core::Engine.routes.draw do
     end
 
     resources :analytics, only: [:index] do
-      post :sinfo, on: :collection
+      collection do
+        post :sinfo
+        match :create_comment, via: [:get, :post]   
+      end
     end
+
   end
 
   resources :notices do

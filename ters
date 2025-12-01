@@ -1,0 +1,50 @@
+                        List of relations
+ Schema |                  Name                   | Type  | Owner 
+--------+-----------------------------------------+-------+-------
+ public | core_access_fields                      | table | octo
+ public | core_accesses                           | table | octo
+ public | core_analytics_node_states              | table | octo
+ public | core_analytics_nodes                    | table | octo
+ public | core_analytics_partitions               | table | octo
+ public | core_analytics_snapshots                | table | octo
+ public | core_analytics_systems                  | table | octo
+ public | core_bot_links                          | table | octo
+ public | core_cities                             | table | octo
+ public | core_cluster_logs                       | table | octo
+ public | core_cluster_quotas                     | table | octo
+ public | core_clusters                           | table | octo
+ public | core_countries                          | table | octo
+ public | core_credentials                        | table | octo
+ public | core_critical_technologies              | table | octo
+ public | core_critical_technologies_per_projects | table | octo
+ public | core_department_mergers                 | table | octo
+ public | core_direction_of_sciences              | table | octo
+ public | core_direction_of_sciences_per_projects | table | octo
+ public | core_employment_position_fields         | table | octo
+ public | core_employment_position_names          | table | octo
+ public | core_employment_positions               | table | octo
+ public | core_employments                        | table | octo
+ public | core_group_of_research_areas            | table | octo
+ public | core_members                            | table | octo
+ public | core_notice_show_options                | table | octo
+ public | core_notices                            | table | octo
+ public | core_organization_departments           | table | octo
+ public | core_organization_kinds                 | table | octo
+ public | core_organizations                      | table | octo
+ public | core_partitions                         | table | octo
+ public | core_project_cards                      | table | octo
+ public | core_project_invitations                | table | octo
+ public | core_project_kinds                      | table | octo
+ public | core_project_versions                   | table | octo
+ public | core_projects                           | table | octo
+ public | core_quota_kinds                        | table | octo
+ public | core_removed_members                    | table | octo
+ public | core_request_fields                     | table | octo
+ public | core_requests                           | table | octo
+ public | core_research_areas                     | table | octo
+ public | core_research_areas_per_projects        | table | octo
+ public | core_sureties                           | table | octo
+ public | core_surety_members                     | table | octo
+ public | core_surety_scans                       | table | octo
+(45 rows)
+

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 2025_11_25_181315) do
+ActiveRecord::Schema.define(version: 2025_12_01_175356) do
 
   # These are extensions that must be enabled in order to support this database
   enable_extension "plpgsql"
@@ -443,6 +443,33 @@ ActiveRecord::Schema.define(version: 2025_11_25_181315) do
     t.string "name_en"
     t.index ["private_key"], name: "index_core_clusters_on_private_key", unique: true
     t.index ["public_key"], name: "index_core_clusters_on_public_key", unique: true
+  end
+
+  create_table "core_comments", force: :cascade do |t|
+    t.bigint "author_id", null: false
+    t.bigint "system_id"
+    t.string "title", null: false
+    t.text "body"
+    t.datetime "valid_from", null: false
+    t.datetime "valid_to"
+    t.integer "severity", default: 0, null: false
+    t.boolean "pinned", default: false, null: false
+    t.string "tag_keys", default: [], null: false, array: true
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["author_id"], name: "index_core_comments_on_author_id"
+    t.index ["system_id"], name: "index_core_comments_on_system_id"
+    t.index ["tag_keys"], name: "index_core_comments_on_tag_keys", using: :gin
+    t.index ["valid_from"], name: "index_core_comments_on_valid_from"
+    t.index ["valid_to"], name: "index_core_comments_on_valid_to"
+  end
+
+  create_table "core_comments_users", force: :cascade do |t|
+    t.string "email", null: false
+    t.string "name"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["email"], name: "index_core_comments_users_on_email", unique: true
   end
 
   create_table "core_countries", id: :serial, force: :cascade do |t|
@@ -1430,5 +1457,6 @@ ActiveRecord::Schema.define(version: 2025_11_25_181315) do
   add_foreign_key "core_analytics_partitions", "core_analytics_systems", column: "system_id"
   add_foreign_key "core_analytics_snapshots", "core_analytics_systems", column: "system_id"
   add_foreign_key "core_bot_links", "users"
+  add_foreign_key "core_comments", "users", column: "author_id"
   add_foreign_key "support_field_values", "support_topics_fields", column: "topics_field_id"
 end

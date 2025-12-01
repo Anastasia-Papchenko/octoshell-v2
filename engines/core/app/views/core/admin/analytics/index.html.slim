@@ -10,16 +10,54 @@
               form: { 'data-type': 'script' },
               class: 'btn btn-primary')
 
+style
+  | .analytics-comments-form .form-group + .form-group {
+  |   margin-top: 15px;
+  | }
+  | .analytics-comments-form .required-asterisk {
+  |   color: #d9534f;
+  |   margin-left: 3px;
+  | }
+  | .analytics-comments-form .form-group > label {
+  |   display: block;
+  |   margin-bottom: 5px;
+  | }
+  | .analytics-comments-form .datetime-select-group {
+  |   display: flex;
+  |   flex-wrap: wrap;
+  |   gap: 4px;
+  | }
+  | .analytics-comments-form .datetime-select-group select {
+  |   min-width: 80px;
+  | }
+  | .analytics-comments-form .section-header {
+  |   margin-top: 25px;
+  |   margin-bottom: 10px;
+  | }
+  | .analytics-comments-form h4 {
+  |   margin-top: 15px;
+  | }
+  | .analytics-comments-form .datetimepicker {
+  |   max-width: 260px;
+  | }
+
+
+- active_tab = @active_tab || 'analytics'
+- analytics_active = (active_tab == 'analytics')
+- comments_active  = (active_tab == 'comments')
+
+
 ul.nav.nav-tabs
-  li.active
-    a href="#analytics_tab" data-toggle="tab"
-      | Аналитика
-  li
-    a href="#comments_tab" data-toggle="tab"
-      | Комментарии администратора
+  li class=(analytics_active ? 'active' : '')
+    = link_to 'Аналитика',
+              url_for(controller: '/core/admin/analytics', action: :index)
+  li class=(comments_active ? 'active' : '')
+    = link_to 'Комментарии администратора',
+              url_for(controller: '/core/admin/analytics', action: :create_comment)
+
 
 .tab-content style="margin-top: 20px;"
-  .tab-pane.active#analytics_tab
+  .tab-pane#analytics_tab class=(analytics_active ? 'active' : '')
 
     - shown = defined?(@sinfo_log) && @sinfo_log.present?
     .panel.panel-default id="sinfo_log_panel" style=("display: none" unless shown)
@@ -183,7 +221,6 @@ ul.nav.nav-tabs
                 - down  = stats['down'].to_i
                 - others = total - alloc - idle - down
                 tr
-                  -# форматируем время, если I18n настроен
                   td = (defined?(l) ? l(snap.captured_at, format: :short) : snap.captured_at)
                   td = snap.system.name
                   td = total
@@ -197,7 +234,6 @@ ul.nav.nav-tabs
               button#load_more_snapshots.btn.btn-default type="button"
                 | Показать ещё 5 снимков
 
-        / JS для показа только последних 5 строк и постепенной догрузки
         javascript:
           (function() {
             function setupSnapshotsPagination() {
@@ -241,12 +277,134 @@ ul.nav.nav-tabs
             document.addEventListener('turbolinks:load', setupSnapshotsPagination);
           })();
 
-
-  .tab-pane#comments_tab
+  .tab-pane#comments_tab class=(comments_active ? 'active' : '')
     .panel.panel-default
       .panel-heading Комментарии администратора
       .panel-body
-        p
-          | Здесь позже появится форма, куда администратор сможет вносить свои комментарии по состоянию узлов.
-        p.text-muted
-          | Пока это просто заглушка для проверки работы вкладок.
+        - if @comment && @comment.errors.any?
+          .alert.alert-danger
+            ul
+              - @comment.errors.full_messages.each do |msg|
+                li = msg
+
+        = form_for @comment,
+                   as: :comment,
+                   url: url_for(controller: '/core/admin/analytics', action: 'create_comment'),
+                   html: { class: 'analytics-comments-form' } do |f|
+
+          .form-group
+            = f.label :title do
+              | Краткое название события
+              span.required-asterisk title="Обязательное поле" *
+            = f.text_field :title, class: 'form-control', placeholder: 'Кратко опишите событие'
+
+          .form-group
+            = f.label :body do
+              | Подробное описание
+              span.required-asterisk title="Обязательное поле" *
+            = f.text_area :body,
+                          rows: 4,
+                          class: 'form-control',
+                          placeholder: 'Опишите, что произошло, какие системы затронуты и т.п.'
+
+          .row
+            .col-md-4.col-sm-6
+              .form-group
+                = f.label :valid_from do
+                  | Действует с
+                  span.required-asterisk title="Обязательное поле" *
+                = f.text_field :valid_from,
+                               class: 'form-control datetimepicker',
+                               autocomplete: 'off',
+                               placeholder: 'Например, 03.12.2025 16:51'
+
+            .col-md-4.col-sm-6
+              .form-group
+                = f.label :valid_to, 'Действует до'
+                = f.text_field :valid_to,
+                               class: 'form-control datetimepicker',
+                               autocomplete: 'off',
+                               placeholder: 'Можно оставить пустым'
+
+
+
+            .col-md-4.col-sm-6
+              .form-group
+                = f.label :severity do
+                  | Серьёзность
+                  span.required-asterisk title="Обязательное поле" *
+                = f.select :severity,
+                           Core::Comments::Comment.severities.keys.map { |k| [k, k] },
+                           {},
+                           class: 'form-control',
+                           style: 'max-width: 220px;'
+
+          .form-group.section-header
+            h4 Причины / ситуации
+            - Core::Comments::Comment.tag_groups.each do |group_key, group|
+              .panel.panel-default
+                .panel-heading = group[:name]
+                .panel-body
+                  - group[:tags].each do |tag|
+                    .checkbox
+                      label
+                        = check_box_tag 'comment[tag_keys][]',
+                                        tag[:key],
+                                        @comment.tag_keys.include?(tag[:key]),
+                                        id: "comment_tag_#{tag[:key]}"
+                        = tag[:label]
+
+          .form-group
+            = f.submit 'Сохранить комментарий', class: 'btn btn-primary'
+
+    - if @recent_comments.present?
+      hr
+      h3 Последние комментарии
+      table.table.table-striped.table-condensed
+        thead
+          tr
+            th Интервал действия
+            th Заголовок
+            th Тэги
+            th Автор
+        tbody
+        - @recent_comments.each do |comment|
+          tr
+            td
+              = (defined?(l) ? l(comment.valid_from, format: :short) : comment.valid_from)
+              - if comment.valid_to
+                |  — #{defined?(l) ? l(comment.valid_to, format: :short) : comment.valid_to}
+            td
+              = comment.title
+              - if comment.severity_incident?
+                span.label.label-danger style="margin-left: 6px;" Инцидент
+              - elsif comment.severity_warning?
+                span.label.label-warning style="margin-left: 6px;" Предупреждение
+
+              td
+                - if comment.tags.any?
+                  - comment.tags.each do |tag|
+                    span.label.label-default style="margin-right: 3px"
+                      = tag[:label]
+                - else
+                  span.text-muted нет тэгов
+              td = comment.author&.name || comment.author&.email || '—'
+
+  javascript:
+    (function() {
+      function initCommentDateTimePickers() {
+        if (typeof $ === 'undefined' || !$.fn.datetimepicker) { return; }
+
+        $('.analytics-comments-form .datetimepicker').datetimepicker({
+          format: 'DD.MM.YYYY HH:mm',
+          locale: 'ru',
+          sideBySide: true,
+          showClear: true,
+          showClose: true
+        });
+      }
+
+      document.addEventListener('DOMContentLoaded', initCommentDateTimePickers);
+      document.addEventListener('turbolinks:load', initCommentDateTimePickers);
+    })();
+
