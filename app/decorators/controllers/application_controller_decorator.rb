@@ -66,16 +66,16 @@ ApplicationController.class_eval do
   # end
 
 
-  # def admin_submenu_items
-  #   menu = Face::MyMenu.admin_submenu(self)
-  #   # menu.is_a?(Array) ? menu.compact : []
-  # end
   def admin_submenu_items
-    Face::MyMenu.admin_submenu(self) || []
-  rescue NoMethodError => e
-    Rails.logger.error("[admin_submenu_items] #{e.class}: #{e.message}")
-    []
+    menu = Face::MyMenu.admin_submenu(self)
+    # menu.is_a?(Array) ? menu.compact : []
   end
+  # def admin_submenu_items
+  #   Face::MyMenu.admin_submenu(self) || []
+  # rescue NoMethodError => e
+  #   Rails.logger.error("[admin_submenu_items] #{e.class}: #{e.message}")
+  #   []
+  # end
 
 
 end

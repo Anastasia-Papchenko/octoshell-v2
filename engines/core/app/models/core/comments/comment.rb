@@ -5,9 +5,7 @@ module Core
 
       belongs_to :author,
            class_name: 'Core::Comments::User',
-           foreign_key: :author_id,
-           inverse_of: :comments
-
+           foreign_key: :author_id
 
       enum severity: {
         info: 0,    

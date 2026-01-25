@@ -20,10 +20,7 @@ module Core
     add_ability(:manage, :geography, 'superadmins')
     add_controller_ability(:manage, :geography, 'admin/cities', 'admin/countries')
     add_ability(:manage,  :notices, 'superadmins')
-    add_controller_ability(:manage, :core, 'admin/core',
-                           'admin/surveys',
-                           'admin/report_submit_denial_reasons',
-                           'admin/projects', 'admin/analytics')
+
     add_ability(:manage, :core, 'superadmins')
 
     add_ability(:manage, :core_analytics, 'superadmins')

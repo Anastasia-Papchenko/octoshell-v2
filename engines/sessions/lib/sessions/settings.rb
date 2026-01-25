@@ -5,10 +5,10 @@ module Sessions
     add_ability(:manage, :reports, 'superadmins', 'experts')
     add_controller_ability(:manage, :reports, 'admin/reports', 'admin/report_projects')
     add_ability(:manage, :sessions, 'superadmins', 'experts')
-    # add_controller_ability(:manage, :sessions, 'admin/sessions',
-    #                        'admin/surveys',
-    #                        'admin/report_submit_denial_reasons',
-    #                        'admin/projects', 'admin/analytics')
+    add_controller_ability(:manage, :sessions, 'admin/sessions',
+                           'admin/surveys',
+                           'admin/report_submit_denial_reasons',
+                           'admin/projects')
 
     add_routes do
       mount Sessions::Engine, :at => "/sessions"

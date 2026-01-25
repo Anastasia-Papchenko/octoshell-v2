@@ -1,7 +1,8 @@
 module Core
   class Admin::AnalyticsController < Admin::ApplicationController
-    skip_before_action :authorize_admins, only: [:index, :sinfo, :create_comment], raise: false
+    #skip_before_action :authorize_admins, only: [:index, :sinfo, :create_comment], raise: false
     before_action :require_analytics_access
+    before_action :octo_authorize!
     octo_use(:project_class, :core, 'Project')
 
     before_action :prepare_comments, only: [:index]
