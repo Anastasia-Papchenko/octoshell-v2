@@ -1,10 +1,10 @@
 module Core
   class Admin::PrepareMergeController < Admin::ApplicationController
-    layout "layouts/core/admin"
+    layout "layouts/core/admin_organization"
     def index
       respond_to do |format|
         format.html do
-          @search = DepartmentMerger.search(params[:q])
+          @search = DepartmentMerger.ransack(params[:q])
           search_result = @search.result(distinct: true).order(id: :desc)
           @mergers = search_result.page(params[:page]).includes(:to_organization,:to_department,:source_department)
         end

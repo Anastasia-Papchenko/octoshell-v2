@@ -2,5 +2,7 @@
 set -e
 rm -f tmp/pids/server.pid
 cp config/database.yml.example config/database.yml
-rails s -b 0.0.0.0
+cp .vscode/settings.docker-example.json .vscode/settings.json
+
 # bundle install
+rails s -b 0.0.0.0

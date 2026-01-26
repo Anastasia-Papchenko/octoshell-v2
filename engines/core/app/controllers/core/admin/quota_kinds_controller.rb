@@ -2,7 +2,7 @@ module Core
   class Admin::QuotaKindsController < Admin::ApplicationController
     before_action :octo_authorize!
     def index
-      @search = QuotaKind.search(params[:q])
+      @search = QuotaKind.ransack(params[:q])
       @quota_kinds = @search.result(distinct: true).page(params[:page])
     end
 
@@ -36,7 +36,7 @@ module Core
     private
 
     def quota_kind_params
-      params.require(:quota_kind).permit(QuotaKind.locale_columns(:name,:measurement))
+      params.require(:quota_kind).permit(QuotaKind.locale_columns(:name,:measurement), :api_key )
     end
   end
 end
