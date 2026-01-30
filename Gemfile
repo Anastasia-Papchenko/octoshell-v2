@@ -114,3 +114,7 @@ end
 # gem 'sprockets-rails', '2.3.3'
 gem 'ffi' # , '1.16.3'
 gem 'rails-i18n' # , '~> 7.0.0'
+
+#
+gem 'ed25519'
+gem 'bcrypt_pbkdf'

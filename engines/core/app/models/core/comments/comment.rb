@@ -7,11 +7,11 @@ module Core
            class_name: 'Core::Comments::User',
            foreign_key: :author_id
 
-      enum severity: {
+      enum :severity, {
         info: 0,    
         warning: 1,  
         incident: 2  
-      }, _prefix: :severity
+      }, prefix: :severity
 
       TAG_GROUPS = {
         'incident' => {
