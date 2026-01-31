@@ -1,4 +1,4 @@
-class CreateCoreUsers < ActiveRecord::Migration[5.2]
+class CreateCoreCommentsUsers < ActiveRecord::Migration[5.2]
   def change
     create_table :core_comments_users do |t|
       t.string :email, null: false

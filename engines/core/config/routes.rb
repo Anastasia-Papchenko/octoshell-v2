@@ -118,6 +118,9 @@ Core::Engine.routes.draw do
       collection do
         post :sinfo
         match :create_comment, via: [:get, :post]   
+
+        post :create_tag
+        delete 'tags/:id', action: :destroy_tag, as: :destroy_tag
       end
     end
 

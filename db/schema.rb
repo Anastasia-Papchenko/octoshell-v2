@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2025_12_21_200135) do
+ActiveRecord::Schema[8.0].define(version: 2026_01_30_000130) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -444,6 +444,14 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_21_200135) do
     t.index ["public_key"], name: "index_core_clusters_on_public_key", unique: true
   end
 
+  create_table "core_comment_tags", id: false, force: :cascade do |t|
+    t.bigint "comment_id", null: false
+    t.bigint "tag_id", null: false
+    t.datetime "created_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.index ["comment_id", "tag_id"], name: "index_core_comment_tags_unique_comment_tag", unique: true
+    t.index ["tag_id"], name: "index_core_comment_tags_on_tag_id"
+  end
+
   create_table "core_comments", force: :cascade do |t|
     t.bigint "author_id", null: false
     t.bigint "system_id"
@@ -461,6 +469,16 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_21_200135) do
     t.index ["tag_keys"], name: "index_core_comments_on_tag_keys", using: :gin
     t.index ["valid_from"], name: "index_core_comments_on_valid_from"
     t.index ["valid_to"], name: "index_core_comments_on_valid_to"
+  end
+
+  create_table "core_comments_nodes", force: :cascade do |t|
+    t.bigint "comment_id", null: false
+    t.bigint "node_id", null: false
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+    t.index ["comment_id", "node_id"], name: "index_core_comments_nodes_unique_comment_node", unique: true
+    t.index ["comment_id"], name: "index_core_comments_nodes_on_comment_id"
+    t.index ["node_id"], name: "index_core_comments_nodes_on_node_id"
   end
 
   create_table "core_comments_users", force: :cascade do |t|
@@ -853,6 +871,30 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_21_200135) do
     t.integer "surety_id"
     t.string "image"
     t.index ["surety_id"], name: "index_core_surety_scans_on_surety_id"
+  end
+
+  create_table "core_tag_groups", force: :cascade do |t|
+    t.string "key", null: false
+    t.string "name", null: false
+    t.integer "sort_order", default: 0, null: false
+    t.boolean "is_active", default: true, null: false
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+    t.index ["is_active", "sort_order"], name: "index_core_tag_groups_on_active_and_sort"
+    t.index ["key"], name: "index_core_tag_groups_on_key", unique: true
+  end
+
+  create_table "core_tags", force: :cascade do |t|
+    t.bigint "group_id", null: false
+    t.string "key", null: false
+    t.string "label", null: false
+    t.integer "sort_order", default: 0, null: false
+    t.boolean "is_active", default: true, null: false
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+    t.index ["group_id", "is_active", "sort_order"], name: "index_core_tags_on_group_active_sort"
+    t.index ["group_id", "key"], name: "index_core_tags_unique_group_key", unique: true
+    t.index ["group_id"], name: "index_core_tags_on_group_id"
   end
 
   create_table "delayed_jobs", id: :serial, force: :cascade do |t|
@@ -1504,6 +1546,11 @@ ActiveRecord::Schema[8.0].define(version: 2025_12_21_200135) do
   add_foreign_key "core_analytics_partitions", "core_analytics_systems", column: "system_id"
   add_foreign_key "core_analytics_snapshots", "core_analytics_systems", column: "system_id"
   add_foreign_key "core_bot_links", "users"
+  add_foreign_key "core_comment_tags", "core_comments", column: "comment_id"
+  add_foreign_key "core_comment_tags", "core_tags", column: "tag_id"
   add_foreign_key "core_comments", "users", column: "author_id"
+  add_foreign_key "core_comments_nodes", "core_analytics_nodes", column: "node_id"
+  add_foreign_key "core_comments_nodes", "core_comments", column: "comment_id"
+  add_foreign_key "core_tags", "core_tag_groups", column: "group_id"
   add_foreign_key "support_field_values", "support_topics_fields", column: "topics_field_id"
 end

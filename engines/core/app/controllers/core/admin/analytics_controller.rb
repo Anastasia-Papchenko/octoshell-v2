@@ -5,7 +5,7 @@ module Core
     before_action :octo_authorize!
     octo_use(:project_class, :core, 'Project')
 
-    before_action :prepare_comments, only: [:index]
+    before_action :prepare_comments, only: [:index, :create_comment]
 
     def index
       @total_reports     = 0
@@ -73,8 +73,8 @@ module Core
         end
       end
 
-      @comment ||= Core::Comments::Comment.new
-      @recent_comments = Core::Comments::Comment.order(valid_from: :desc, created_at: :desc)
+      # @comment ||= Core::Comments::Comment.new
+      # @recent_comments = Core::Comments::Comment.order(valid_from: :desc, created_at: :desc)
                                                 
 
       @active_tab ||= 'analytics'
@@ -132,33 +132,83 @@ module Core
         index
         @active_tab = 'comments'
         render :index
+        return
+      end
+
+      @comment = Core::Comments::Comment.new(comment_params)
+
+      comments_user = Core::Comments::User.find_or_initialize_by(email: current_user.email)
+      if comments_user.new_record?
+        comments_user.name =
+          current_user.try(:full_name) ||
+          current_user.try(:name) ||
+          current_user.email
+        comments_user.save!
+      end
+
+      @comment.author = comments_user
+      new_tag_ids = ensure_custom_tags(custom_tag_labels_from_params)
+      @comment.tag_ids = (@comment.tag_ids + new_tag_ids).uniq if new_tag_ids.any?
+
+
+      if @comment.save
+        flash[:notice] = 'Комментарий сохранён.'
+        redirect_to url_for(controller: '/core/admin/analytics', action: :create_comment)
       else
-        @comment = Core::Comments::Comment.new(comment_params)
-
-        comments_user = Core::Comments::User.find_or_initialize_by(email: current_user.email)
-
-        if comments_user.new_record?
-          comments_user.name =
-            current_user.try(:full_name) ||
-            current_user.try(:name) ||
-            current_user.email
-
-          comments_user.save!
-        end
-
-        @comment.author = comments_user
-
-        if @comment.save
-          flash[:notice] = 'Комментарий сохранён.'
-          redirect_to url_for(controller: '/core/admin/analytics', action: :create_comment)
-        else
-          flash.now[:alert] = 'Не удалось сохранить комментарий.'
-          index
-          @active_tab = 'comments'
-          render :index
-        end
+        flash.now[:alert] = 'Не удалось сохранить комментарий.'
+        index
+        @active_tab = 'comments'
+        render :index
       end
     end
+
+    def create_tag
+      label = params.dig(:tag, :label).to_s.strip
+      return render_tags_update(alert: 'Введите название тега.', status: 422) if label.blank?
+
+      group = Core::Comments::TagGroup.find_or_create_by!(key: 'custom') do |g|
+        g.name = 'Пользовательские'
+        g.sort_order = 1000
+        g.is_active = true
+      end
+
+      base_key = label.parameterize(separator: '_')
+      base_key = "tag_#{SecureRandom.hex(4)}" if base_key.blank?
+
+      key = base_key
+      i = 2
+      while Core::Comments::Tag.exists?(group_id: group.id, key: key)
+        key = "#{base_key}_#{i}"
+        i += 1
+      end
+
+      tag = Core::Comments::Tag.new(
+        group_id: group.id,
+        key: key,
+        label: label,
+        sort_order: 0,
+        is_active: true
+      )
+
+      if tag.save
+        render_tags_update(notice: 'Тег добавлен.', auto_check_tag_id: tag.id)
+      else
+        render_tags_update(alert: tag.errors.full_messages.to_sentence, status: 422)
+      end
+    end
+
+
+    def destroy_tag
+      tag = Core::Comments::Tag.find(params[:id])
+
+      if tag.group&.key != 'custom'
+        return render_tags_update(alert: 'Удалять можно только пользовательские теги (custom).', status: 422)
+      end
+
+      tag.destroy
+      render_tags_update(notice: 'Тег удалён.')
+    end
+
 
 
     private
@@ -174,17 +224,24 @@ module Core
           raise ActionController::ParameterMissing, :comment
         end
 
-      params.require(key).permit(
+      permitted = params.require(key).permit(
+        :system_id,
         :title,
         :body,
         :valid_from,
         :valid_to,
         :severity,
-        :pinned,
-        :system_id,
-        tag_keys: []
+        node_ids: [],
+        tag_ids: []
       )
+
+      permitted[:node_ids] = Array(permitted[:node_ids]).reject(&:blank?).map(&:to_i).uniq
+      permitted[:tag_ids]  = Array(permitted[:tag_ids]).reject(&:blank?).map(&:to_i).uniq
+
+      permitted
     end
+
+
 
     def role?(name)
       return false unless current_user
@@ -220,11 +277,136 @@ module Core
     end
 
     def prepare_comments
-      @comment = Core::Comments::Comment.new(valid_from: Time.current)
-      @recent_comments = Core::Comments::Comment
-                           .includes(:author)
-                           .recent_first
-                           .limit(20)
+
+      @tag_groups = Core::Comments::TagGroup.includes(:tags).order(:sort_order, :id)
+      @tag_usage  = Core::Comments::CommentTag.group(:tag_id).count
+
+      @comment ||= Core::Comments::Comment.new(valid_from: Time.current)
+
+      @nodes = Core::Analytics::Node
+                .select(:id, :system_id, :hostname, :prefix)
+                .order(:system_id, :prefix, :hostname)
+
+      @tag_groups = Core::Comments::TagGroup.includes(:tags).order(:sort_order, :id)
+
+      rel = Core::Comments::Comment
+              .includes(:author, :system, :tags, :nodes)
+              .recent_first
+
+      rel = rel.where(system_id: params[:system_id]) if params[:system_id].present?
+      rel = rel.where(severity: params[:severity]) if params[:severity].present?
+      rel = rel.current if params[:active_only].to_s == '1'
+
+      @recent_comments = rel.limit(20)
+    end
+
+
+    def custom_tag_labels_from_params
+      raw = params.dig(:comment, :new_tags) || params.dig(:comments_comment, :new_tags)
+      return [] if raw.blank?
+
+      raw.to_s
+        .split(/[,\n;]/)
+        .map { |s| s.strip }
+        .reject(&:blank?)
+        .uniq
+        .take(10)
+    end
+
+    def ensure_custom_tags(labels)
+      return [] if labels.blank?
+
+      group = Core::Comments::TagGroup.find_or_create_by!(key: 'custom') do |g|
+        g.name = 'Пользовательские'
+        g.sort_order = 1000
+        g.is_active = true
+      end
+
+      labels.map { |label| find_or_create_tag_in_group(group, label).id }
+    end
+
+    def find_or_create_tag_in_group(group, label)
+      # сначала пытаемся найти по label (без учёта регистра)
+      existing = Core::Comments::Tag.where(group_id: group.id)
+                                  .where('LOWER(label) = ?', label.downcase)
+                                  .first
+      return existing if existing
+
+      base_key = label.to_s.parameterize(separator: '_')
+      base_key = "tag_#{SecureRandom.hex(4)}" if base_key.blank?
+
+      key = base_key
+      i = 2
+      while Core::Comments::Tag.exists?(group_id: group.id, key: key)
+        key = "#{base_key}_#{i}"
+        i += 1
+      end
+
+      Core::Comments::Tag.create!(
+        group_id: group.id,
+        key: key,
+        label: label,
+        sort_order: 0,
+        is_active: true
+      )
+    end
+
+    def load_tags_data
+      @tag_groups = Core::Comments::TagGroup.includes(:tags).order(:sort_order, :id)
+      @tag_usage  = Core::Comments::CommentTag.group(:tag_id).count
+    end
+
+    def render_tags_update(notice: nil, alert: nil, auto_check_tag_id: nil, status: 200)
+      load_tags_data
+
+      checkboxes_html = render_to_string(
+        partial: 'core/admin/analytics/tags_checkboxes',
+        formats: [:html],
+        locals: { tag_groups: @tag_groups, comment: @comment || Core::Comments::Comment.new }
+      )
+
+      manage_html = render_to_string(
+        partial: 'core/admin/analytics/tags_manage',
+        formats: [:html],
+        locals: { tag_groups: @tag_groups, tag_usage: @tag_usage }
+      )
+
+      js = <<~JS
+        (function(){
+          // запомним отмеченные теги в форме комментария
+          var checked = Array.prototype.slice.call(
+            document.querySelectorAll('#tag_checkboxes_container input[type="checkbox"]:checked')
+          ).map(function(cb){ return cb.value; });
+
+          var c = document.getElementById('tag_checkboxes_container');
+          var m = document.getElementById('tag_manage_container');
+
+          if (c) { c.innerHTML = #{checkboxes_html.to_json}; }
+          if (m) { m.innerHTML = #{manage_html.to_json}; }
+
+          // восстановим отмеченные теги
+          checked.forEach(function(id){
+            var cb = document.querySelector('#tag_checkboxes_container input[type="checkbox"][value="'+id+'"]');
+            if (cb) cb.checked = true;
+          });
+
+          // авто-отметим новый тег (если нужно)
+          #{auto_check_tag_id ? "var cb2=document.querySelector('#tag_checkboxes_container input[type=\"checkbox\"][value=\"#{auto_check_tag_id}\"]'); if(cb2) cb2.checked=true;" : ""}
+
+          var n=document.getElementById('tags_notice');
+          if(n){
+            n.textContent = #{(notice || '').to_json};
+            n.style.display = #{notice ? "'block'" : "'none'"};
+          }
+          var a=document.getElementById('tags_alert');
+          if(a){
+            a.textContent = #{(alert || '').to_json};
+            a.style.display = #{alert ? "'block'" : "'none'"};
+          }
+        })();
+      JS
+
+      render js: js, status: status
     end
 
   end

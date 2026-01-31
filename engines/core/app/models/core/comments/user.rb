@@ -7,7 +7,7 @@ module Core
                class_name: 'Core::Comments::Comment',
                foreign_key: :author_id,
                inverse_of: :author,
-               dependent: :nullify
+               dependent: :restrict_with_error
 
       validates :email, presence: true, uniqueness: true
     end

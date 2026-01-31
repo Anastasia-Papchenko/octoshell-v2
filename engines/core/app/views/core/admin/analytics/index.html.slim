@@ -278,12 +278,20 @@ ul.nav.nav-tabs
           })();
 
   .tab-pane#comments_tab class=(comments_active ? 'active' : '')
+    - severity_labels = { 'info' => 'Инфо', 'warning' => 'Предупреждение', 'incident' => 'Инцидент' }
+    - severity_badge  = { 'info' => 'label-default', 'warning' => 'label-warning', 'incident' => 'label-danger' }
+
+    / =========================
+    / FORM (TOP)
+    / =========================
     .panel.panel-default
-      .panel-heading Комментарии администратора
+      .panel-heading
+        strong Новый комментарий
       .panel-body
         - if @comment && @comment.errors.any?
           .alert.alert-danger
-            ul
+            strong Ошибка сохранения:
+            ul style="margin-top: 8px;"
               - @comment.errors.full_messages.each do |msg|
                 li = msg
 
@@ -293,19 +301,32 @@ ul.nav.nav-tabs
                    html: { class: 'analytics-comments-form' } do |f|
 
           .form-group
-            = f.label :title do
-              | Краткое название события
+            = f.label :system_id do
+              | Система
               span.required-asterisk title="Обязательное поле" *
-            = f.text_field :title, class: 'form-control', placeholder: 'Кратко опишите событие'
+            = f.collection_select :system_id,
+                                  (@systems || []),
+                                  :id, :name,
+                                  { include_blank: 'Выберите систему' },
+                                  class: 'form-control',
+                                  id: 'comment_system_id'
+            p.help-block style="margin-top: 6px;"
+              | Комментарий привязывается к системе и (опционально) к конкретным узлам.
 
           .form-group
-            = f.label :body do
-              | Подробное описание
+            = f.label :title do
+              | Заголовок
               span.required-asterisk title="Обязательное поле" *
+            = f.text_field :title,
+                           class: 'form-control',
+                           placeholder: 'Коротко: что произошло / что изменилось'
+
+          .form-group
+            = f.label :body, 'Описание (опционально)'
             = f.text_area :body,
-                          rows: 4,
+                          rows: 5,
                           class: 'form-control',
-                          placeholder: 'Опишите, что произошло, какие системы затронуты и т.п.'
+                          placeholder: 'Детали: влияние, причины, действия, ссылки и т.п.'
 
           .row
             .col-md-4.col-sm-6
@@ -316,95 +337,245 @@ ul.nav.nav-tabs
                 = f.text_field :valid_from,
                                class: 'form-control datetimepicker',
                                autocomplete: 'off',
-                               placeholder: 'Например, 03.12.2025 16:51'
-
+                               placeholder: 'ДД.ММ.ГГГГ ЧЧ:ММ'
             .col-md-4.col-sm-6
               .form-group
-                = f.label :valid_to, 'Действует до'
+                = f.label :valid_to, 'Действует до (опционально)'
                 = f.text_field :valid_to,
                                class: 'form-control datetimepicker',
                                autocomplete: 'off',
                                placeholder: 'Можно оставить пустым'
-
-
-
             .col-md-4.col-sm-6
               .form-group
                 = f.label :severity do
                   | Серьёзность
                   span.required-asterisk title="Обязательное поле" *
+                - severity_options = Core::Comments::Comment.severities.keys.map { |k| [severity_labels[k] || k, k] }
                 = f.select :severity,
-                           Core::Comments::Comment.severities.keys.map { |k| [k, k] },
+                           severity_options,
                            {},
-                           class: 'form-control',
-                           style: 'max-width: 220px;'
+                           class: 'form-control'
 
-          .form-group.section-header
-            h4 Причины / ситуации
-            - Core::Comments::Comment.tag_groups.each do |group_key, group|
-              .panel.panel-default
-                .panel-heading = group[:name]
-                .panel-body
-                  - group[:tags].each do |tag|
-                    .checkbox
-                      label
-                        = check_box_tag 'comment[tag_keys][]',
-                                        tag[:key],
-                                        @comment.tag_keys.include?(tag[:key]),
-                                        id: "comment_tag_#{tag[:key]}"
-                        = tag[:label]
+          .row
+            / =========================
+            / NODES (LEFT)
+            / =========================
+            .col-md-6.col-sm-12
+              .form-group.section-header
+                h4 style="margin-bottom: 8px;" Затронутые узлы (опционально)
+                p.text-muted style="margin-top: 0;"
+                  | Можно искать по имени. Выбирай узлы только в рамках выбранной системы.
 
-          .form-group
-            = f.submit 'Сохранить комментарий', class: 'btn btn-primary'
+                .form-group style="margin-bottom: 8px;"
+                  = text_field_tag :node_search,
+                                   '',
+                                   class: 'form-control',
+                                   placeholder: 'Поиск узла: hostname / prefix (например n4500)',
+                                   id: 'node_search_input'
 
-    - if @recent_comments.present?
-      hr
-      h3 Последние комментарии
-      table.table.table-striped.table-condensed
-        thead
-          tr
-            th Интервал действия
-            th Заголовок
-            th Тэги
-            th Автор
-        tbody
-        - @recent_comments.each do |comment|
-          tr
-            td
-              = (defined?(l) ? l(comment.valid_from, format: :short) : comment.valid_from)
-              - if comment.valid_to
-                |  — #{defined?(l) ? l(comment.valid_to, format: :short) : comment.valid_to}
-            td
-              = comment.title
-              - if comment.severity_incident?
-                span.label.label-danger style="margin-left: 6px;" Инцидент
-              - elsif comment.severity_warning?
-                span.label.label-warning style="margin-left: 6px;" Предупреждение
+                = hidden_field_tag 'comment[node_ids][]', ''
 
-              td
-                - if comment.tags.any?
-                  - comment.tags.each do |tag|
-                    span.label.label-default style="margin-right: 3px"
-                      = tag[:label]
+                - nodes = (@nodes || [])
+                - if nodes.blank?
+                  p.text-muted Нет списка узлов — добавь @nodes в контроллер.
                 - else
-                  span.text-muted нет тэгов
-              td = comment.author&.name || comment.author&.email || '—'
+                  .panel.panel-default style="max-height: 260px; overflow: auto; margin-bottom: 0;"
+                    .panel-body style="padding: 10px;"
+                      - nodes.sort_by { |n| [n.system_id.to_i, n.prefix.to_s, n.hostname.to_s] }.each do |node|
+                        - checked = @comment.respond_to?(:node_ids) ? @comment.node_ids.include?(node.id) : false
+                        - label = "#{node.prefix} / #{node.hostname}"
+                        .checkbox.node-checkbox data-system-id=node.system_id data-node-text=label.downcase
+                          label
+                            = check_box_tag 'comment[node_ids][]',
+                                            node.id,
+                                            checked,
+                                            id: "comment_node_#{node.id}"
+                            = label
 
-  javascript:
-    (function() {
-      function initCommentDateTimePickers() {
-        if (typeof $ === 'undefined' || !$.fn.datetimepicker) { return; }
+            / =========================
+            / TAGS (RIGHT)
+            / =========================
+            .col-md-6.col-sm-12
+              .form-group.section-header
+                h4 style="margin-bottom: 8px;" Теги (опционально)
 
-        $('.analytics-comments-form .datetimepicker').datetimepicker({
-          format: 'DD.MM.YYYY HH:mm',
-          locale: 'ru',
-          sideBySide: true,
-          showClear: true,
-          showClose: true
-        });
-      }
+                / ввод нового тега (создастся в БД при сохранении)
+                .form-group style="margin-bottom: 10px;"
+                  = label_tag 'comment[new_tags]', 'Добавить новый тег'
+                  = text_field_tag 'comment[new_tags]',
+                                   '',
+                                   class: 'form-control',
+                                   placeholder: 'Например: сеть, охлаждение, апгрейд'
+                  p.help-block style="margin-top: 6px;"
+                    | Можно несколько через запятую. Они сохранятся в справочник (группа «Пользовательские») и привяжутся к комментарию.
 
-      document.addEventListener('DOMContentLoaded', initCommentDateTimePickers);
-      document.addEventListener('turbolinks:load', initCommentDateTimePickers);
-    })();
+                #tag_checkboxes_container
+                  = hidden_field_tag 'comment[tag_ids][]', ''
 
+                  - tag_groups = (@tag_groups || [])
+                  - if tag_groups.blank?
+                    p.text-muted Справочник тегов пустой. Новые теги всё равно можно добавить через поле выше.
+                  - else
+                    - tag_groups.each do |group|
+                      - next unless group.is_active
+                      - group_tags = group.tags.select(&:is_active).sort_by { |t| [t.sort_order.to_i, t.label.to_s] }
+                      - next if group_tags.blank?
+
+                      .panel.panel-default style="margin-bottom: 10px;"
+                        .panel-heading
+                          strong = group.name
+                        .panel-body style="padding: 10px;"
+                          .row
+                            - group_tags.each do |tag|
+                              - checked = @comment.respond_to?(:tag_ids) ? @comment.tag_ids.include?(tag.id) : false
+                              .col-md-6.col-sm-6
+                                .checkbox
+                                  label
+                                    = check_box_tag 'comment[tag_ids][]',
+                                                    tag.id,
+                                                    checked,
+                                                    id: "comment_tag_#{tag.id}"
+                                    = tag.label
+
+
+          .form-group style="margin-top: 15px;"
+            = f.submit 'Сохранить', class: 'btn btn-primary'
+            = button_tag 'Очистить', type: 'reset', class: 'btn btn-default', style: 'margin-left: 8px;'
+
+
+    / =========================
+    / TAG DIRECTORY MANAGEMENT (OUTSIDE comment form!)
+    / =========================
+    hr
+
+    .alert.alert-success#tags_notice style="display:none; margin-top: 10px;"
+    .alert.alert-danger#tags_alert style="display:none; margin-top: 10px;"
+
+    #tag_manage_container
+      = render 'core/admin/analytics/tags_manage', tag_groups: @tag_groups, tag_usage: @tag_usage
+
+    / =========================
+    / COMMENTS LIST (BOTTOM)
+    / =========================
+    .panel.panel-default style="margin-top: 20px;"
+      .panel-heading
+        strong Комментарии (последние)
+      .panel-body
+        = form_tag url_for(controller: '/core/admin/analytics', action: :create_comment),
+                   method: :get,
+                   class: 'form-inline',
+                   style: 'margin-bottom: 12px;' do
+          .form-group style="margin-right: 10px;"
+            = select_tag :system_id,
+                         options_from_collection_for_select((@systems || []), :id, :name, params[:system_id]),
+                         include_blank: 'Все системы',
+                         class: 'form-control'
+
+          .form-group style="margin-right: 10px;"
+            - sev_opts = Core::Comments::Comment.severities.keys.map { |k| [severity_labels[k] || k, k] }
+            = select_tag :severity,
+                         options_for_select([['Любая серьёзность', '']] + sev_opts, params[:severity]),
+                         class: 'form-control'
+
+          .checkbox style="margin-right: 10px;"
+            label
+              = check_box_tag :active_only, '1', params[:active_only].to_s == '1'
+              | только активные
+
+          = submit_tag 'Фильтровать', class: 'btn btn-default'
+
+        - if @recent_comments.blank?
+          p.text-muted Нет комментариев.
+        - else
+          table.table.table-striped.table-condensed
+            thead
+              tr
+                th style="width: 190px;" Интервал
+                th Заголовок
+                th style="width: 220px;" Система
+                th style="width: 140px;" Узлы
+                th style="width: 220px;" Теги
+                th style="width: 160px;" Автор
+            tbody
+              - @recent_comments.each do |comment|
+                - sev = comment.severity.to_s
+                tr
+                  td
+                    = (defined?(l) ? l(comment.valid_from, format: :short) : comment.valid_from)
+                    - if comment.valid_to.present?
+                      br
+                      span.text-muted
+                        = (defined?(l) ? l(comment.valid_to, format: :short) : comment.valid_to)
+
+                  td
+                    strong = comment.title
+                    span.label class=(severity_badge[sev] || 'label-default') style="margin-left: 6px;"
+                      = (severity_labels[sev] || sev)
+
+                    - if comment.body.present?
+                      div.text-muted style="margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 520px;"
+                        = comment.body
+
+                  td = comment.try(:system)&.name || '—'
+
+                  td
+                    - if comment.respond_to?(:nodes) && comment.nodes.any?
+                      span.label.label-info = "#{comment.nodes.size} шт."
+                    - else
+                      span.text-muted —
+
+                  td
+                    - if comment.respond_to?(:tags) && comment.tags.any?
+                      - comment.tags.take(6).each do |tag|
+                        span.label.label-default style="margin-right: 4px;"
+                          = tag.label
+                      - if comment.tags.size > 6
+                        span.text-muted = "+#{comment.tags.size - 6}"
+                    - else
+                      span.text-muted —
+
+                  td = comment.author&.name.presence || comment.author&.email || '—'
+
+    / ===== JS: filter nodes by system + search by text =====
+    javascript:
+      (function() {
+        function filterNodes() {
+          var systemSelect = document.getElementById('comment_system_id');
+          var queryInput   = document.getElementById('node_search_input');
+          if (!systemSelect) return;
+
+          var selectedSystem = (systemSelect.value || '').trim();
+          var q = (queryInput && queryInput.value ? queryInput.value : '').toLowerCase().trim();
+
+          var nodes = document.querySelectorAll('.node-checkbox');
+
+          nodes.forEach(function(row) {
+            var sid = (row.getAttribute('data-system-id') || '').trim();
+            var text = (row.getAttribute('data-node-text') || '').trim();
+
+            var okSystem = (!selectedSystem || sid === selectedSystem);
+            var okSearch = (!q || text.indexOf(q) >= 0);
+
+            var visible = okSystem && okSearch;
+            row.style.display = visible ? '' : 'none';
+
+            if (!visible) {
+              var cb = row.querySelector('input[type="checkbox"]');
+              if (cb) cb.checked = false;
+            }
+          });
+        }
+
+        function setup() {
+          var systemSelect = document.getElementById('comment_system_id');
+          var queryInput   = document.getElementById('node_search_input');
+
+          if (systemSelect) systemSelect.addEventListener('change', filterNodes);
+          if (queryInput)   queryInput.addEventListener('input', filterNodes);
+
+          filterNodes();
+        }
+
+        document.addEventListener('DOMContentLoaded', setup);
+        document.addEventListener('turbolinks:load', setup);
+      })();
