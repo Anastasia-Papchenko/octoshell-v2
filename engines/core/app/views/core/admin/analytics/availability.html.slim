@@ -1,0 +1,422 @@
+- content_for :page_title do
+  = 'Аналитика — Доступность'
+
+.div.page-header
+  h1 Аналитика
+
+style
+  | .availability-filters { display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; }
+  | .availability-filters .form-group { margin: 0; }
+  | .availability-chart-wrap { height: 320px; position: relative; }
+  | .availability-chart-wrap.availability-empty { height: auto; padding: 8px 0; }
+  | canvas.availability-chart { width:100% !important; height:100% !important; display:block; }
+
+  | .availability-legend span { display:inline-block; padding:4px 8px; border-radius:4px; margin-right:6px; }
+  | .availability-legend .info { background: rgba(91, 192, 222, 0.18); }
+  | .availability-legend .warning { background: rgba(240, 173, 78, 0.18); }
+  | .availability-legend .incident { background: rgba(217, 83, 79, 0.18); }
+
+  | .cluster-toggle .toggle-icon { font-size: 30px; transition: transform 0.2s ease; }
+  | .cluster-toggle:not(.collapsed) .toggle-icon { transform: rotate(90deg); }
+
+= javascript_include_tag 'https://cdn.jsdelivr.net/npm/chart.js@4.5.1/dist/chart.umd.min.js'
+= javascript_include_tag 'https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.1.0/dist/chartjs-plugin-annotation.min.js'
+= javascript_include_tag 'https://cdn.jsdelivr.net/npm/date-fns@2.30.0'
+= javascript_include_tag 'https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js'
+
+= stylesheet_link_tag 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css'
+= javascript_include_tag 'https://cdn.jsdelivr.net/npm/flatpickr'
+= javascript_include_tag 'https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js'
+
+- active_tab = @active_tab || 'analytics'
+- analytics_active    = (active_tab == 'analytics')
+- availability_active = (active_tab == 'availability')
+- comments_active     = (active_tab == 'comments')
+
+= render 'core/admin/analytics/tabs', active_tab: (@active_tab || 'availability')
+
+hr
+
+.panel.panel-default
+  .panel-heading
+    strong Параметры графиков
+  .panel-body
+    - from_val = params[:from].presence || (@from && @from.strftime('%Y-%m-%d %H:%M'))
+    - to_val   = params[:to].presence   || (@to && @to.strftime('%Y-%m-%d %H:%M'))
+    - metric_val = params[:metric].presence || (@metric || 'idle')
+
+    = form_with url: url_for(controller: '/core/admin/analytics', action: :availability),
+                method: :get,
+                local: true,
+                data: { turbo: false },
+                html: { class: 'availability-filters' } do
+      .form-group
+        label С
+        = text_field_tag :from, from_val, class: 'form-control datetimepicker', autocomplete: 'off', placeholder: 'YYYY-MM-DD HH:MM'
+
+      .form-group
+        label По
+        = text_field_tag :to, to_val, class: 'form-control datetimepicker', autocomplete: 'off', placeholder: 'YYYY-MM-DD HH:MM'
+
+      .form-group
+        label Что считать “доступными”
+        = select_tag :metric,
+                     options_for_select([['Свободные (idle)', 'idle'],
+                                         ['В строю (alloc + idle)', 'work'],
+                                         ['Поднятые (total - down/drain/maint/...)', 'up']], metric_val),
+                     class: 'form-control'
+
+      .form-group
+        = submit_tag 'Показать', class: 'btn btn-primary'
+
+    .availability-legend style="margin-top: 12px;"
+      span.info info
+      span.warning warning
+      span.incident incident
+      span.text-muted style="margin-left:10px;"
+        | Полупрозрачные зоны — интервалы комментариев администраторов.
+
+- if (@clusters || []).blank?
+  p.text-muted Нет кластеров.
+- else
+  - (@clusters || []).each do |cluster|
+    - collapse_id = "availability_cluster_#{cluster.id}"
+
+    .panel.panel-info
+      .panel-heading
+        a.cluster-toggle.collapsed data-toggle="collapse" href="##{collapse_id}" role="button" aria-expanded="false" aria-controls=collapse_id style="display:flex; align-items:center; justify-content:space-between; text-decoration:none;"
+          span
+            strong = cluster.name_ru
+            |  (#{cluster.host})
+          span.toggle-icon ▸
+
+      .panel-collapse.collapse.in id=collapse_id
+        .panel-body
+          .availability-chart-wrap
+            - data_url = url_for(controller: '/core/admin/analytics',
+                                 action: :availability_data,
+                                 cluster_id: cluster.id,
+                                 from: from_val,
+                                 to: to_val,
+                                 metric: metric_val)
+            canvas.availability-chart id="availability_chart_#{cluster.id}" data-url=data_url
+
+javascript:
+  (function() {
+    function registerChartPluginsOnce() {
+      if (typeof Chart === 'undefined') return;
+      if (Chart.__octoPluginsRegistered) return;
+
+      var ann = window.ChartAnnotation || window['chartjs-plugin-annotation'];
+      if (ann) Chart.register(ann);
+
+      Chart.__octoPluginsRegistered = true;
+    }
+
+    function sevBg(sev) {
+      if (sev === 'incident') return 'rgba(217, 83, 79, 0.14)';
+      if (sev === 'warning')  return 'rgba(240, 173, 78, 0.14)';
+      return 'rgba(91, 192, 222, 0.10)'; // info
+    }
+
+    function sevBorder(sev) {
+      if (sev === 'incident') return 'rgba(217, 83, 79, 0.55)';
+      if (sev === 'warning')  return 'rgba(240, 173, 78, 0.55)';
+      return 'rgba(91, 192, 222, 0.45)';
+    }
+
+    function sevLabel(sev) {
+      if (sev === 'incident') return 'Инцидент (комментарии)';
+      if (sev === 'warning')  return 'Предупреждение (комментарии)';
+      return 'Инфо (комментарии)';
+    }
+
+    function mergeIntervals(list) {
+      if (!list.length) return [];
+      list.sort(function(a, b) { return a.fromMs - b.fromMs; });
+
+      var out = [];
+      var cur = { fromMs: list[0].fromMs, toMs: list[0].toMs };
+
+      for (var i = 1; i < list.length; i++) {
+        var it = list[i];
+        if (it.fromMs <= cur.toMs + 60 * 1000) {
+          cur.toMs = Math.max(cur.toMs, it.toMs);
+        } else {
+          out.push(cur);
+          cur = { fromMs: it.fromMs, toMs: it.toMs };
+        }
+      }
+
+      out.push(cur);
+      return out;
+    }
+
+    function buildAnnotations(comments, maxY) {
+      var groups = { info: [], warning: [], incident: [] };
+
+      comments.forEach(function(c) {
+        var sev = (c.severity || 'info').toString();
+        if (!groups[sev]) sev = 'info';
+
+        var fromMs = Date.parse(c.from);
+        var toMs   = Date.parse(c.to);
+
+        if (isNaN(fromMs) || isNaN(toMs)) return;
+        if (toMs <= fromMs) return;
+
+        groups[sev].push({ fromMs: fromMs, toMs: toMs });
+      });
+
+      var annotations = {};
+
+      Object.keys(groups).forEach(function(sev) {
+        var merged = mergeIntervals(groups[sev]);
+        merged.forEach(function(it, idx) {
+          var key = sev + '_' + idx;
+          annotations[key] = {
+            type: 'box',
+            xMin: new Date(it.fromMs),
+            xMax: new Date(it.toMs),
+            yMin: 0,
+            yMax: maxY,
+
+            backgroundColor: sevBg(sev),
+            borderColor: sevBorder(sev),
+            borderWidth: 1,
+
+            drawTime: 'beforeDatasetsDraw'
+          };
+        });
+      });
+
+      return annotations;
+    }
+
+    function installLegendForComments(chart, hasComments) {
+      if (!hasComments) return;
+
+      var defaultGen = Chart.defaults.plugins.legend.labels.generateLabels;
+
+      chart.options.plugins.legend.labels.generateLabels = function(c) {
+        var labels = defaultGen(c);
+
+        ['info', 'warning', 'incident'].forEach(function(sev) {
+          labels.push({
+            text: sevLabel(sev),
+            fillStyle: sevBg(sev),
+            strokeStyle: sevBorder(sev),
+            lineWidth: 1,
+            hidden: false,
+            _isCommentLayer: true,
+            _sev: sev
+          });
+        });
+
+        return labels;
+      };
+
+      chart.options.plugins.legend.onClick = function(e, legendItem, legend) {
+        var c = legend.chart;
+
+        if (legendItem && legendItem._isCommentLayer) {
+          var sev = legendItem._sev;
+          c.$commentLayerState = c.$commentLayerState || { info: true, warning: true, incident: true };
+          c.$commentLayerState[sev] = !c.$commentLayerState[sev];
+
+          var anns = c.options.plugins.annotation.annotations || {};
+          Object.keys(anns).forEach(function(k) {
+            if (k.indexOf(sev + '_') === 0) {
+              anns[k].display = c.$commentLayerState[sev];
+            }
+          });
+
+          c.update();
+          return;
+        }
+
+        Chart.defaults.plugins.legend.onClick(e, legendItem, legend);
+      };
+    }
+
+    async function renderOne(canvas) {
+      if (!canvas || typeof Chart === 'undefined') return;
+
+      var url = canvas.getAttribute('data-url');
+      if (!url) return;
+
+      var resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      if (!resp.ok) return;
+
+      var payload = await resp.json();
+
+      console.log('[availability_data]', url, {
+        total_nodes: payload.total_nodes,
+        points_len: (payload.points || []).length,
+        first_point: (payload.points || [])[0],
+        comments_len: (payload.comments || []).length
+      });
+
+      var points = (payload.points || []).map(function(p) {
+        return { x: p.x, y: p.y };
+      });
+
+      if (!points.length) {
+        if (canvas._chartInstance) {
+          canvas._chartInstance.destroy();
+          canvas._chartInstance = null;
+        }
+
+        var wrap = canvas.parentElement; 
+        if (wrap) {
+          wrap.classList.add('availability-empty');
+          canvas.style.display = 'none';
+
+          var msg = wrap.querySelector('.availability-empty-message');
+          if (!msg) {
+            msg = document.createElement('div');
+            msg.className = 'availability-empty-message text-muted';
+            wrap.appendChild(msg);
+          }
+          msg.textContent =
+            'Нет данных Slurm (снимков) за выбранный период. ' +
+            'Попробуй расширить период или сначала нажми “Обновить состояние узлов (sinfo)” на вкладке Аналитика.';
+        }
+        return;
+      }
+
+      var wrap2 = canvas.parentElement;
+      if (wrap2) {
+        wrap2.classList.remove('availability-empty');
+        var old = wrap2.querySelector('.availability-empty-message');
+        if (old) old.remove();
+      }
+      canvas.style.display = 'block';
+
+      var comments   = payload.comments || [];
+      var totalNodes = payload.total_nodes || 0;
+
+      var maxPointY = 0;
+      for (var i = 0; i < points.length; i++) {
+        if (points[i].y > maxPointY) maxPointY = points[i].y;
+      }
+
+      var maxY = Math.max(totalNodes, maxPointY, 1);
+      var annotations = buildAnnotations(comments, maxY);
+
+      if (canvas._chartInstance) canvas._chartInstance.destroy();
+
+      var ctx = canvas.getContext('2d');
+
+      var chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          datasets: [{
+            label: 'Активных узлов',
+            data: points,
+
+            showLine: true,
+            tension: 0,
+            borderWidth: 2,
+
+            pointRadius: 3,
+            pointHoverRadius: 5,
+            pointHitRadius: 8,
+
+            borderColor: '#0b3aa4',
+            pointBackgroundColor: '#d40000',
+            pointBorderColor: '#d40000'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+
+          scales: {
+            x: {
+              type: 'time',
+              time: {
+                unit: 'day',
+                displayFormats: { day: 'dd.MM' },
+                tooltipFormat: 'dd.MM.yyyy HH:mm'
+              },
+              ticks: {
+                autoSkip: true,
+                maxTicksLimit: 12
+              }
+            },
+            y: {
+              beginAtZero: true,
+              suggestedMax: maxY,
+              title: { display: true, text: 'Количество узлов' }
+            }
+          },
+
+          plugins: {
+            legend: {
+              display: true,
+              labels: { boxWidth: 30 }
+            },
+            annotation: {
+              annotations: annotations
+            }
+          }
+        }
+      });
+
+      installLegendForComments(chart, comments.length > 0);
+
+      canvas._chartInstance = chart;
+      chart.update();
+    }
+
+    function initCharts() {
+      registerChartPluginsOnce();
+
+      document.querySelectorAll('canvas.availability-chart').forEach(function(c) {
+        renderOne(c);
+      });
+
+      document.querySelectorAll('.panel-collapse').forEach(function(el) {
+        el.addEventListener('shown.bs.collapse', function() {
+          var canvas = el.querySelector('canvas.availability-chart');
+          if (!canvas) return;
+
+          if (canvas._chartInstance) {
+            canvas._chartInstance.resize();
+            canvas._chartInstance.update();
+          } else {
+            renderOne(canvas);
+          }
+        });
+      });
+    }
+
+    function initDateTimePickers() {
+      if (typeof flatpickr === 'undefined') return;
+      var els = document.querySelectorAll('.datetimepicker');
+      els.forEach(function(el) {
+        if (el._flatpickr) return;
+        flatpickr(el, {
+          enableTime: true,
+          time_24hr: true,
+          allowInput: true,
+          minuteIncrement: 1,
+          dateFormat: "Y-m-d H:i",
+          altInput: true,
+          altFormat: "d.m.Y H:i",
+          locale: (flatpickr.l10ns && flatpickr.l10ns.ru) ? flatpickr.l10ns.ru : "ru"
+        });
+      });
+    }
+
+    function initAll() {
+      initDateTimePickers();
+      initCharts();
+    }
+
+    document.addEventListener('DOMContentLoaded', initAll);
+    document.addEventListener('turbolinks:load', initAll);
+    document.addEventListener('turbo:load', initAll);
+  })();

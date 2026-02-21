@@ -23,14 +23,18 @@ module Core
     private
 
     def open_connection
-      @connection_to_cluster = @ssh_class.start(@cluster.host,
-                                                @cluster.admin_login,
-                                                key_data: @cluster.private_key)
+      @connection_to_cluster = @ssh_class.start(
+        @cluster.host,
+        @cluster.admin_login,
+        key_data: [@cluster.private_key]
+      )
+
     end
 
     def close_connection
-      @connection_to_cluster.close
+      @connection_to_cluster&.close
     end
+
 
     def jobs_of_users(logins, start_time, partitions)
       logins = logins.join(',')

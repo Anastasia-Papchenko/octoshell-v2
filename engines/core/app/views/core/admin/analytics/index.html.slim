@@ -3,12 +3,22 @@
 
 .div.page-header
   h1 Аналитика
-  = button_to('Обновить состояние узлов (sinfo)',
-              url_for(controller: '/core/admin/analytics', action: 'sinfo'),
+
+  = form_with url: url_for(controller: '/core/admin/analytics', action: 'sinfo'),
               method: :post,
-              remote: true,
-              form: { 'data-type': 'script' },
-              class: 'btn btn-primary')
+              local: true,
+              data: { turbo: false },
+              html: { style: 'display:flex; gap:10px; align-items:center;' } do
+
+    = select_tag :cluster_id,
+                 options_from_collection_for_select(@clusters || [], :id, :name, params[:cluster_id]),
+                 include_blank: 'Выберите кластер',
+                 class: 'form-control',
+                 required: true
+
+    = submit_tag 'Обновить состояние узлов (sinfo)', class: 'btn btn-primary'
+
+
 
 style
   | .analytics-comments-form .form-group + .form-group {
@@ -17,6 +27,14 @@ style
   | .analytics-comments-form .required-asterisk {
   |   color: #d9534f;
   |   margin-left: 3px;
+  | }
+  | .cluster-toggle .toggle-icon {
+  |   font-size: 30px;
+  |   transition: transform 0.2s ease;
+  | }
+  |
+  | .cluster-toggle:not(.collapsed) .toggle-icon {
+  |   transform: rotate(90deg);
   | }
   | .analytics-comments-form .form-group > label {
   |   display: block;
@@ -47,41 +65,54 @@ style
 - comments_active  = (active_tab == 'comments')
 
 
-ul.nav.nav-tabs
-  li class=(analytics_active ? 'active' : '')
-    = link_to 'Аналитика',
-              url_for(controller: '/core/admin/analytics', action: :index)
-  li class=(comments_active ? 'active' : '')
-    = link_to 'Комментарии администратора',
-              url_for(controller: '/core/admin/analytics', action: :create_comment)
-
+= render 'core/admin/analytics/tabs', active_tab: (@active_tab || 'analytics')
 
 .tab-content style="margin-top: 20px;"
   .tab-pane#analytics_tab class=(analytics_active ? 'active' : '')
 
-    - shown = defined?(@sinfo_log) && @sinfo_log.present?
-    .panel.panel-default id="sinfo_log_panel" style=("display: none" unless shown)
-      .panel-heading Лог sinfo
+    - sinfo_log    = @sinfo_log
+    - sinfo_result = @sinfo_result
+    - sinfo_error  = @sinfo_error
+
+
+    .panel.panel-default id="sinfo_log_panel"
+      .panel-heading SINFO: вывод / ошибки
       .panel-body
-        pre#sinfo_log style="max-height: 480px; overflow: auto; white-space: pre-wrap"
-          = shown ? @sinfo_log : ''
+        - if flash[:alert].present?
+          .alert.alert-danger = flash[:alert]
+        - if flash[:notice].present?
+          .alert.alert-success = flash[:notice]
+
+        - if sinfo_error.present?
+          p.text-muted Детали ошибки:
+          pre style="max-height: 220px; overflow: auto; white-space: pre-wrap;" = sinfo_error
+
+        p.text-muted Вывод команды:
+        pre#sinfo_log style="max-height: 360px; overflow: auto; white-space: pre-wrap" = (sinfo_log.presence || "(пока пусто — нажмите «Обновить»)")
+
+        - if sinfo_result.present?
+          hr
+          p.text-muted Результат парсинга/сохранения:
+          pre#sinfo_result style="max-height: 220px; overflow: auto; white-space: pre-wrap" = sinfo_result.to_json
 
     h2 Текущая загрузка узлов (круговая диаграмма)
 
     - if @global_state_counts.blank?
       p.text-muted Нет данных о текущих состояниях узлов. Нажмите «Обновить состояние узлов (sinfo)» выше.
     - else
-      / Подключаем Chart.js с CDN
       = javascript_include_tag 'https://cdn.jsdelivr.net/npm/chart.js'
+      = stylesheet_link_tag 'https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css'
+      = javascript_include_tag 'https://cdn.jsdelivr.net/npm/flatpickr'
+      = javascript_include_tag 'https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/ru.js'
+
 
       - labels = Core::Analytics::NodeState::STATES.select { |st| @global_state_counts[st].to_i > 0 }
       - data   = labels.map { |st| @global_state_counts[st].to_i }
 
       .row
         .col-md-8.col-sm-12.col-md-offset-2
-          .chart-container style="max-width: 500px; margin: 30px auto 40px auto;"
-            canvas#states_pie_chart data-labels=labels.join(',') data-values=data.join(',') style="display:block; width:100%; height:auto;"
-
+          .chart-container style="max-width: 300px; margin: 30px auto 40px auto;"
+            canvas#states_pie_chart data-labels=labels.join(',') data-values=data.join(',') style="display:block; width:100%; height:auto;"     
       javascript:
         (function() {
           function renderStatesPieChart() {
@@ -112,7 +143,7 @@ ul.nav.nav-tabs
                 responsive: true,
                 plugins: {
                   legend: {
-                    position: 'bottom'
+                    position: 'right'
                   },
                   title: {
                     display: false
@@ -126,164 +157,173 @@ ul.nav.nav-tabs
           document.addEventListener('turbolinks:load', renderStatesPieChart);
         })();
 
-    - if @systems.blank?
+    - if @clusters.blank?
       .alert.alert-info
         | Пока нет данных об узлах. Нажмите кнопку «Обновить состояние узлов (sinfo)» выше.
     - else
-      - @systems.each do |system|
-        - stats = @system_stats[system.id] || {}
+      - @clusters.each do |cluster|
+        - stats = @cluster_stats[cluster.id] || {}
+        - collapse_id = "cluster_panel_#{cluster.id}"
+
         .panel.panel-info
           .panel-heading
-            strong = system.name
-            |  (#{system.slug})
-            - if stats[:total_nodes].to_i > 0
-              span.pull-right
-                | Всего узлов: #{stats[:total_nodes]}
-          .panel-body
-            - total = stats[:total_nodes].to_f
-            - state_counts = stats[:states] || {}
-            - issues = stats[:issues].to_i
+            a.cluster-toggle.collapsed data-toggle="collapse" href="##{collapse_id}" role="button" aria-expanded="false" aria-controls=collapse_id style="display:flex; align-items:center; justify-content:space-between; text-decoration:none;"
+              
+              span
+                strong = cluster.name
+                |  (#{cluster.host})
+                - if stats[:total_nodes].to_i > 0
+                  span.text-muted style="margin-left: 10px;"
+                    | Всего узлов: #{stats[:total_nodes]}
 
-            - if total.zero?
-              p.text-muted Нет данных о текущих состояниях узлов для этой системы.
-            - else
-              h4 Состояния узлов (текущий срез)
-              table.table.table-condensed.table-bordered
-                thead
-                  tr
-                    th Состояние
-                    th Узлов
-                    th Доля
-                tbody
-                  - Core::Analytics::NodeState::STATES.each do |state|
-                    - count = state_counts[state] || 0
-                    - next if count.zero?
-                    tr
-                      td = state
-                      td = count
-                      - percent = ((count / total) * 100).round(1)
-                      td = "#{percent} %"
+              span.toggle-icon ▸
 
-              - if issues > 0
-                p
-                  span.label.label-danger
-                    | Узлов с флагом has_reason: #{issues}
+
+          .panel-collapse.collapse.in id=collapse_id
+            .panel-body
+              - total = stats[:total_nodes].to_f
+              - state_counts = stats[:states] || {}
+              - issues = stats[:issues].to_i
+
+              - if total.zero?
+                p.text-muted Нет данных о текущих состояниях узлов для этой системы.
               - else
-                p.text-muted Нет узлов с флагом has_reason в текущем состоянии.
-
-            - partitions = @partition_stats[system.id] || {}
-            - if partitions.present?
-              hr
-              h4 Партиции
-              table.table.table-condensed.table-striped
-                thead
-                  tr
-                    th Партиция
-                    th Всего узлов (по состояниям)
-                    th alloc
-                    th idle
-                    th down
-                    th другие
-                tbody
-                  - partitions.each_value do |pstats|
-                    - states = pstats[:states] || {}
-                    - total_p = states.values.sum
+                h4 Состояния узлов (текущий срез)
+                table.table.table-condensed.table-bordered
+                  thead
                     tr
-                      td = pstats[:name]
-                      td = total_p
-                      td = states['alloc'].to_i
-                      td = states['idle'].to_i
-                      td = states['down'].to_i
-                      - others = total_p - states['alloc'].to_i - states['idle'].to_i - states['down'].to_i
-                      td = others
+                      th Состояние
+                      th Узлов
+                      th Доля
+                  tbody
+                    - Core::Analytics::NodeState::STATES.each do |state|
+                      - count = state_counts[state] || 0
+                      - next if count.zero?
+                      tr
+                        td = state
+                        td = count
+                        - percent = ((count / total) * 100).round(1)
+                        td = "#{percent} %"
 
-        h2 История загрузки (последние снимки)
+                - if issues > 0
+                  p
+                    span.label.label-danger
+                      | Узлов с флагом has_reason: #{issues}
+                - else
+                  p.text-muted Нет узлов с флагом has_reason в текущем состоянии.
 
-        - if @latest_snapshots.blank?
-          p.text-muted Снимков ещё нет — выполните загрузку SINFO.
-        - else
-          table#snapshots_table.table.table-striped.table-condensed
-            thead
+              - partitions = @partition_stats[cluster.id] || {}
+              - if partitions.present?
+                hr
+                h4 Партиции
+                table.table.table-condensed.table-striped
+                  thead
+                    tr
+                      th Партиция
+                      th Всего узлов (по состояниям)
+                      th alloc
+                      th idle
+                      th down
+                      th другие
+                  tbody
+                    - partitions.each_value do |pstats|
+                      - states = pstats[:states] || {}
+                      - total_p = states.values.sum
+                      tr
+                        td = pstats[:name]
+                        td = total_p
+                        td = states['alloc'].to_i
+                        td = states['idle'].to_i
+                        td = states['down'].to_i
+                        - others = total_p - states['alloc'].to_i - states['idle'].to_i - states['down'].to_i
+                        td = others
+
+        
+
+      h2 История загрузки (последние снимки)
+
+      - if @latest_snapshots.blank?
+        p.text-muted Снимков ещё нет — выполните загрузку SINFO.
+      - else
+        table#snapshots_table.table.table-striped.table-condensed
+          thead
+            tr
+              th Время снимка
+              th Система
+              th Всего записей
+              th alloc
+              th idle
+              th down
+              th другие
+          tbody
+            - @latest_snapshots.each do |snap|
+              - stats = @snapshot_stats[snap.id] || {}
+              - total = stats.values.sum
+              - alloc = stats['alloc'].to_i
+              - idle  = stats['idle'].to_i
+              - down  = stats['down'].to_i
+              - others = total - alloc - idle - down
               tr
-                th Время снимка
-                th Система
-                th Всего записей
-                th alloc
-                th idle
-                th down
-                th другие
-            tbody
-              - @latest_snapshots.each do |snap|
-                - stats = @snapshot_stats[snap.id] || {}
-                - total = stats.values.sum
-                - alloc = stats['alloc'].to_i
-                - idle  = stats['idle'].to_i
-                - down  = stats['down'].to_i
-                - others = total - alloc - idle - down
-                tr
-                  td = (defined?(l) ? l(snap.captured_at, format: :short) : snap.captured_at)
-                  td = snap.system.name
-                  td = total
-                  td = alloc
-                  td = idle
-                  td = down
-                  td = others
+                td = (defined?(l) ? l(snap.captured_at, format: :short) : snap.captured_at)
+                td = snap.cluster&.name || snap.cluster&.host || '—'
+                td = total
+                td = alloc
+                td = idle
+                td = down
+                td = others
 
-          - if @latest_snapshots.size > 5
-            .text-center style="margin-top: 10px;"
-              button#load_more_snapshots.btn.btn-default type="button"
-                | Показать ещё 5 снимков
+        - if @latest_snapshots.size > 5
+          .text-center style="margin-top: 10px;"
+            button#load_more_snapshots.btn.btn-default type="button"
+              | Показать ещё 5 снимков
 
-        javascript:
-          (function() {
-            function setupSnapshotsPagination() {
-              var table = document.getElementById('snapshots_table');
-              if (!table) { return; }
+      javascript:
+        (function() {
+          function setupSnapshotsPagination() {
+            var table = document.getElementById('snapshots_table');
+            if (!table) { return; }
 
-              var rows  = table.querySelectorAll('tbody tr');
-              if (!rows.length) { return; }
+            var rows  = table.querySelectorAll('tbody tr');
+            if (!rows.length) { return; }
 
-              var step    = 5;      // показываем/добавляем по 5
-              var visible = 0;
+            var step    = 5;      
+            var visible = 0;
 
-              function updateVisibility() {
-                for (var i = 0; i < rows.length; i++) {
-                  rows[i].style.display = (i < visible) ? '' : 'none';
-                }
-
-                var btn = document.getElementById('load_more_snapshots');
-                if (!btn) { return; }
-
-                if (visible >= rows.length) {
-                  btn.style.display = 'none';
-                } else {
-                  btn.style.display = '';
-                }
+            function updateVisibility() {
+              for (var i = 0; i < rows.length; i++) {
+                rows[i].style.display = (i < visible) ? '' : 'none';
               }
 
-              visible = Math.min(step, rows.length);
-              updateVisibility();
-
               var btn = document.getElementById('load_more_snapshots');
-              if (btn) {
-                btn.addEventListener('click', function() {
-                  visible = Math.min(visible + step, rows.length);
-                  updateVisibility();
-                });
+              if (!btn) { return; }
+
+              if (visible >= rows.length) {
+                btn.style.display = 'none';
+              } else {
+                btn.style.display = '';
               }
             }
 
-            document.addEventListener('DOMContentLoaded', setupSnapshotsPagination);
-            document.addEventListener('turbolinks:load', setupSnapshotsPagination);
-          })();
+            visible = Math.min(step, rows.length);
+            updateVisibility();
+
+            var btn = document.getElementById('load_more_snapshots');
+            if (btn) {
+              btn.addEventListener('click', function() {
+                visible = Math.min(visible + step, rows.length);
+                updateVisibility();
+              });
+            }
+          }
+
+          document.addEventListener('DOMContentLoaded', setupSnapshotsPagination);
+          document.addEventListener('turbolinks:load', setupSnapshotsPagination);
+        })();
 
   .tab-pane#comments_tab class=(comments_active ? 'active' : '')
     - severity_labels = { 'info' => 'Инфо', 'warning' => 'Предупреждение', 'incident' => 'Инцидент' }
     - severity_badge  = { 'info' => 'label-default', 'warning' => 'label-warning', 'incident' => 'label-danger' }
 
-    / =========================
-    / FORM (TOP)
-    / =========================
     .panel.panel-default
       .panel-heading
         strong Новый комментарий
@@ -301,15 +341,15 @@ ul.nav.nav-tabs
                    html: { class: 'analytics-comments-form' } do |f|
 
           .form-group
-            = f.label :system_id do
+            = f.label :cluster_id do
               | Система
               span.required-asterisk title="Обязательное поле" *
-            = f.collection_select :system_id,
-                                  (@systems || []),
+            = f.collection_select :cluster_id,
+                                  (@clusters || []),
                                   :id, :name,
-                                  { include_blank: 'Выберите систему' },
+                                  { include_blank: 'Выберите кластер' },
                                   class: 'form-control',
-                                  id: 'comment_system_id'
+                                  id: 'comment_cluster_id'
             p.help-block style="margin-top: 6px;"
               | Комментарий привязывается к системе и (опционально) к конкретным узлам.
 
@@ -357,9 +397,6 @@ ul.nav.nav-tabs
                            class: 'form-control'
 
           .row
-            / =========================
-            / NODES (LEFT)
-            / =========================
             .col-md-6.col-sm-12
               .form-group.section-header
                 h4 style="margin-bottom: 8px;" Затронутые узлы (опционально)
@@ -380,11 +417,11 @@ ul.nav.nav-tabs
                   p.text-muted Нет списка узлов — добавь @nodes в контроллер.
                 - else
                   .panel.panel-default style="max-height: 260px; overflow: auto; margin-bottom: 0;"
-                    .panel-body style="padding: 10px;"
-                      - nodes.sort_by { |n| [n.system_id.to_i, n.prefix.to_s, n.hostname.to_s] }.each do |node|
+                    .panel-body style="padding: 3px;"
+                      - nodes.sort_by { |n| [n.cluster_id.to_i, n.prefix.to_s, n.hostname.to_s] }.each do |node|
                         - checked = @comment.respond_to?(:node_ids) ? @comment.node_ids.include?(node.id) : false
                         - label = "#{node.prefix} / #{node.hostname}"
-                        .checkbox.node-checkbox data-system-id=node.system_id data-node-text=label.downcase
+                        .checkbox.node-checkbox data-cluster-id=node.cluster_id data-node-text=label.downcase
                           label
                             = check_box_tag 'comment[node_ids][]',
                                             node.id,
@@ -392,14 +429,10 @@ ul.nav.nav-tabs
                                             id: "comment_node_#{node.id}"
                             = label
 
-            / =========================
-            / TAGS (RIGHT)
-            / =========================
             .col-md-6.col-sm-12
               .form-group.section-header
                 h4 style="margin-bottom: 8px;" Теги (опционально)
 
-                / ввод нового тега (создастся в БД при сохранении)
                 .form-group style="margin-bottom: 10px;"
                   = label_tag 'comment[new_tags]', 'Добавить новый тег'
                   = text_field_tag 'comment[new_tags]',
@@ -424,7 +457,7 @@ ul.nav.nav-tabs
                       .panel.panel-default style="margin-bottom: 10px;"
                         .panel-heading
                           strong = group.name
-                        .panel-body style="padding: 10px;"
+                        .panel-body 
                           .row
                             - group_tags.each do |tag|
                               - checked = @comment.respond_to?(:tag_ids) ? @comment.tag_ids.include?(tag.id) : false
@@ -442,10 +475,6 @@ ul.nav.nav-tabs
             = f.submit 'Сохранить', class: 'btn btn-primary'
             = button_tag 'Очистить', type: 'reset', class: 'btn btn-default', style: 'margin-left: 8px;'
 
-
-    / =========================
-    / TAG DIRECTORY MANAGEMENT (OUTSIDE comment form!)
-    / =========================
     hr
 
     .alert.alert-success#tags_notice style="display:none; margin-top: 10px;"
@@ -454,9 +483,6 @@ ul.nav.nav-tabs
     #tag_manage_container
       = render 'core/admin/analytics/tags_manage', tag_groups: @tag_groups, tag_usage: @tag_usage
 
-    / =========================
-    / COMMENTS LIST (BOTTOM)
-    / =========================
     .panel.panel-default style="margin-top: 20px;"
       .panel-heading
         strong Комментарии (последние)
@@ -466,8 +492,8 @@ ul.nav.nav-tabs
                    class: 'form-inline',
                    style: 'margin-bottom: 12px;' do
           .form-group style="margin-right: 10px;"
-            = select_tag :system_id,
-                         options_from_collection_for_select((@systems || []), :id, :name, params[:system_id]),
+            = select_tag :cluster_id,
+                         options_from_collection_for_select((@clusters || []), :id, :name, params[:cluster_id]),
                          include_blank: 'Все системы',
                          class: 'form-control'
 
@@ -516,7 +542,7 @@ ul.nav.nav-tabs
                       div.text-muted style="margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 520px;"
                         = comment.body
 
-                  td = comment.try(:system)&.name || '—'
+                  td = comment.cluster&.name || comment.cluster&.host || '—'
 
                   td
                     - if comment.respond_to?(:nodes) && comment.nodes.any?
@@ -534,29 +560,30 @@ ul.nav.nav-tabs
                     - else
                       span.text-muted —
 
-                  td = comment.author&.name.presence || comment.author&.email || '—'
+                  - author = comment.author
+                  td = author&.try(:name).presence || author&.email || '—'
 
-    / ===== JS: filter nodes by system + search by text =====
+
     javascript:
       (function() {
         function filterNodes() {
-          var systemSelect = document.getElementById('comment_system_id');
-          var queryInput   = document.getElementById('node_search_input');
-          if (!systemSelect) return;
+          var clusterSelect = document.getElementById('comment_cluster_id');
+          var queryInput    = document.getElementById('node_search_input');
+          if (!clusterSelect) return;
 
-          var selectedSystem = (systemSelect.value || '').trim();
+          var selectedCluster = (clusterSelect.value || '').trim();
           var q = (queryInput && queryInput.value ? queryInput.value : '').toLowerCase().trim();
 
           var nodes = document.querySelectorAll('.node-checkbox');
 
           nodes.forEach(function(row) {
-            var sid = (row.getAttribute('data-system-id') || '').trim();
+            var cid  = (row.getAttribute('data-cluster-id') || '').trim();
             var text = (row.getAttribute('data-node-text') || '').trim();
 
-            var okSystem = (!selectedSystem || sid === selectedSystem);
-            var okSearch = (!q || text.indexOf(q) >= 0);
+            var okCluster = (!selectedCluster || cid === selectedCluster);
+            var okSearch  = (!q || text.indexOf(q) >= 0);
 
-            var visible = okSystem && okSearch;
+            var visible = okCluster && okSearch;
             row.style.display = visible ? '' : 'none';
 
             if (!visible) {
@@ -567,11 +594,11 @@ ul.nav.nav-tabs
         }
 
         function setup() {
-          var systemSelect = document.getElementById('comment_system_id');
-          var queryInput   = document.getElementById('node_search_input');
+          var clusterSelect = document.getElementById('comment_cluster_id');
+          var queryInput    = document.getElementById('node_search_input');
 
-          if (systemSelect) systemSelect.addEventListener('change', filterNodes);
-          if (queryInput)   queryInput.addEventListener('input', filterNodes);
+          if (clusterSelect) clusterSelect.addEventListener('change', filterNodes);
+          if (queryInput)    queryInput.addEventListener('input', filterNodes);
 
           filterNodes();
         }
@@ -579,3 +606,31 @@ ul.nav.nav-tabs
         document.addEventListener('DOMContentLoaded', setup);
         document.addEventListener('turbolinks:load', setup);
       })();
+       
+        javascript:
+          (function() {
+            function initDateTimePickers() {
+              if (typeof flatpickr === 'undefined') return;
+
+              var els = document.querySelectorAll('.datetimepicker');
+              if (!els.length) return;
+
+              els.forEach(function(el) {
+                if (el._flatpickr) return;
+
+                flatpickr(el, {
+                  enableTime: true,
+                  time_24hr: true,
+                  allowInput: true,
+                  minuteIncrement: 1,
+                  dateFormat: "Y-m-d H:i",
+                  altInput: true,
+                  altFormat: "d.m.Y H:i",
+                  locale: (flatpickr.l10ns && flatpickr.l10ns.ru) ? flatpickr.l10ns.ru : "ru"
+                });
+              });
+            }
+
+            document.addEventListener('DOMContentLoaded', initDateTimePickers);
+            document.addEventListener('turbolinks:load', initDateTimePickers);
+          })();

@@ -6,10 +6,19 @@ module Core
       STATES    = %w[alloc idle comp drain drng down maint reserved mix].freeze
       SUBSTATES = %w[unknown maintenance pending draining].freeze
 
-      belongs_to :system,    class_name: 'Core::Analytics::System'
-      belongs_to :snapshot,  class_name: 'Core::Analytics::Snapshot'
-      belongs_to :node,      class_name: 'Core::Analytics::Node'
-      belongs_to :partition, class_name: 'Core::Analytics::Partition'
+      def system
+        cluster
+      end
+
+      def system=(v)
+        self.cluster = v
+      end
+
+      belongs_to :cluster, class_name: 'Core::Cluster'
+      belongs_to :partition, class_name: 'Core::Partition'
+      belongs_to :node, class_name: 'Core::Analytics::Node'
+      belongs_to :snapshot, class_name: 'Core::Analytics::Snapshot'
+
 
       validates :state, presence: true, inclusion: { in: STATES }
       validates :substate, allow_nil: true, inclusion: { in: SUBSTATES }

@@ -1,7 +1,7 @@
 class CreateCoreCommentsTags < ActiveRecord::Migration[5.2]
   def change
     create_table :core_tags do |t|
-      t.references :group, null: false, index: true      # -> core_tag_groups
+      t.references :group, null: false, index: true     
 
       t.string  :key,        null: false
       t.string  :label,      null: false

@@ -121,6 +121,9 @@ Core::Engine.routes.draw do
 
         post :create_tag
         delete 'tags/:id', action: :destroy_tag, as: :destroy_tag
+
+        get :availability
+        get :availability_data
       end
     end
 

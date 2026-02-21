@@ -4,13 +4,20 @@ module Core
       self.table_name = 'core_comments'
 
       belongs_to :author,
-                 class_name: 'Core::Comments::User',
+                 class_name: '::User',
                  foreign_key: :author_id,
                  inverse_of: :comments
 
-      belongs_to :system,
-                 class_name: 'Core::Analytics::System',
-                 foreign_key: :system_id
+      belongs_to :cluster, class_name: 'Core::Cluster'
+
+      
+      def system
+        cluster
+      end
+
+      def system=(v)
+        self.cluster = v
+      end
 
       has_many :comment_nodes,
                class_name: 'Core::Comments::CommentNode',

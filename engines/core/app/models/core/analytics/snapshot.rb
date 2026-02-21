@@ -2,7 +2,18 @@ module Core
   module Analytics
     class Snapshot < ApplicationRecord
       self.table_name = 'core_analytics_snapshots'
-      belongs_to :system, class_name:    'Core::Analytics::System'
+      
+      belongs_to :cluster, class_name: 'Core::Cluster'
+
+
+      def system
+        cluster
+      end
+
+      def system=(v)
+        self.cluster = v
+      end
+
       has_many :node_states, class_name: 'Core::Analytics::NodeState', foreign_key: :snapshot_id, dependent: :destroy
       
       scope :latest_first, -> { order(captured_at: :desc) }

@@ -87,5 +87,31 @@ module Core
       self.public_key = key.ssh_public_key
       self.private_key = key.private_key
     end
+
+    has_many :nodes,
+            class_name: 'Core::Analytics::Node',
+            foreign_key: :cluster_id,
+            inverse_of: :cluster
+
+    has_many :snapshots,
+            class_name: 'Core::Analytics::Snapshot',
+            foreign_key: :cluster_id,
+            inverse_of: :cluster
+
+    has_many :node_states,
+            class_name: 'Core::Analytics::NodeState',
+            foreign_key: :cluster_id,
+            inverse_of: :cluster
+    
+    has_many :partitions,
+            class_name: 'Core::Partition',
+            foreign_key: :cluster_id,
+            inverse_of: :cluster
+
+    has_many :comments,
+            class_name: 'Core::Comments::Comment',
+            foreign_key: :cluster_id,
+            inverse_of: :cluster
+
   end
 end

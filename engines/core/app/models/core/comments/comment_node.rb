@@ -20,7 +20,7 @@ module Core
 
       def node_must_belong_to_comment_system
         return if comment.blank? || node.blank?
-        return if node.system_id == comment.system_id
+        return if node.cluster_id.to_i == comment.cluster_id.to_i
 
         errors.add(:node_id, 'узел должен принадлежать той же системе, что и комментарий')
       end
