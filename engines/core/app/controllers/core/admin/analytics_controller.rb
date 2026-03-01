@@ -91,41 +91,13 @@ module Core
       to     = parse_time(params[:to])   || Time.current
       metric = params[:metric].presence || 'idle'
 
-      total_nodes = cluster.nodes.size
+      # ВАЖНО: берем число узлов из аналитической таблицы, а не из cluster.nodes
+      total_nodes = Core::Analytics::Node.where(cluster_id: cluster.id).count
 
       snaps = cluster.snapshots
-                     .where(captured_at: from..to)
-                     .order(:captured_at)
-                     .limit(2000)
-
-      snap_ids = snaps.map(&:id)
-
-      counts =
-        if snap_ids.any?
-          Core::Analytics::NodeState
-            .where(snapshot_id: snap_ids)
-            .group(:snapshot_id, :state)
-            .count
-        else
-          {}
-        end
-
-      unavailable_states = %w[down drain drng maint reserved].freeze
-
-      points = snaps.map do |s|
-        idle  = counts[[s.id, 'idle']].to_i
-        alloc = counts[[s.id, 'alloc']].to_i
-        unavailable = unavailable_states.sum { |st| counts[[s.id, st]].to_i }
-
-        y =
-          case metric
-          when 'work' then (alloc + idle)
-          when 'up'   then [total_nodes - unavailable, 0].max
-          else idle
-          end
-
-        { x: s.captured_at.iso8601, y: y }
-      end
+                    .where(captured_at: from..to)
+                    .order(:captured_at)
+                    .limit(2000)
 
       comments = cluster.comments
                         .where('valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)', to, from)
@@ -141,13 +113,145 @@ module Core
                           }
                         end
 
+      if snaps.blank?
+        return render json: {
+          cluster_id: cluster.id,
+          total_nodes: total_nodes,
+          metric: metric,
+          from: from.iso8601,
+          to: to.iso8601,
+          states: [],
+          series: {},
+          points: [],
+          comments: comments
+        }
+      end
+
+      snap_ids   = snaps.map(&:id)
+      snap_times = snaps.map(&:captured_at)
+
+      # Для старых метрик оставляем старое поведение (на всякий случай)
+      if metric != 'states'
+        counts =
+          Core::Analytics::NodeState
+            .where(snapshot_id: snap_ids)
+            .group(:snapshot_id, :state)
+            .count
+
+        unavailable_states = %w[down drain drng maint reserved].freeze
+
+        points = snaps.map do |s|
+          idle  = counts[[s.id, 'idle']].to_i
+          alloc = counts[[s.id, 'alloc']].to_i
+          unavailable = unavailable_states.sum { |st| counts[[s.id, st]].to_i }
+
+          y =
+            case metric
+            when 'work' then (alloc + idle)
+            when 'up'   then [total_nodes - unavailable, 0].max
+            else idle
+            end
+
+          { x: s.captured_at.iso8601, y: y }
+        end
+
+        return render json: {
+          cluster_id: cluster.id,
+          total_nodes: total_nodes,
+          metric: metric,
+          from: from.iso8601,
+          to: to.iso8601,
+          points: points,
+          comments: comments
+        }
+      end
+
+      # ---------------------------
+      # metric == 'states' (НОВОЕ)
+      # ---------------------------
+
+      first_ts = snaps.first.captured_at
+
+      # База: сколько узлов в каких состояниях на первом снимке (это "срез", а не "дельта")
+      base_counts =
+        Core::Analytics::NodeState
+          .at(first_ts)
+          .where(cluster_id: cluster.id)
+          .group(:state)
+          .count
+          .transform_keys(&:to_s)
+
+      # total_nodes логичнее взять как сумму состояний на первом срезе, если она > 0
+      base_total = base_counts.values.sum
+      total_nodes = base_total if base_total > 0
+
+      # enter: сколько узлов ПЕРЕШЛО в состояние на снимке (новые интервалы)
+      enter_raw =
+        Core::Analytics::NodeState
+          .where(cluster_id: cluster.id, snapshot_id: snap_ids)
+          .group(:snapshot_id, :state)
+          .count
+
+      enter_by_snap = Hash.new { |h, k| h[k] = Hash.new(0) }
+      enter_raw.each do |(sid, st), cnt|
+        enter_by_snap[sid][st.to_s] = cnt.to_i
+      end
+
+      # leave: сколько узлов ВЫШЛО из состояния в момент captured_at (закрытие интервала valid_to)
+      leave_raw =
+        Core::Analytics::NodeState
+          .where(cluster_id: cluster.id, valid_to: snap_times)
+          .group(:valid_to, :state)
+          .count
+
+      leave_by_time = Hash.new { |h, k| h[k] = Hash.new(0) }
+      leave_raw.each do |(t, st), cnt|
+        leave_by_time[t][st.to_s] = cnt.to_i
+      end
+
+      # какие состояния показывать: берём из модели + что реально встречается
+      states = (Core::Analytics::NodeState::STATES.map(&:to_s) + base_counts.keys).uniq
+
+      # текущие счётчики
+      cur = Hash.new(0)
+      base_counts.each { |st, cnt| cur[st] = cnt.to_i }
+
+      series = Hash.new { |h, k| h[k] = [] }
+
+      snaps.each_with_index do |s, idx|
+        # для 1-го снимка уже есть base (NodeState.at(first_ts))
+        if idx > 0
+          t = s.captured_at
+
+          leave_by_time[t].each do |st, cnt|
+            cur[st] -= cnt
+          end
+
+          enter_by_snap[s.id].each do |st, cnt|
+            cur[st] += cnt
+          end
+        end
+
+        x = s.captured_at.iso8601
+        states.each do |st|
+          series[st] << { x: x, y: cur[st].to_i }
+        end
+      end
+
+      # убрать совсем нулевые линии, чтобы легенда не была мусорной
+      states.select! do |st|
+        series[st].any? { |p| p[:y].to_i > 0 }
+      end
+      series.slice!(*states)
+
       render json: {
         cluster_id: cluster.id,
         total_nodes: total_nodes,
         metric: metric,
         from: from.iso8601,
         to: to.iso8601,
-        points: points,
+        states: states,
+        series: series,
         comments: comments
       }
     end
@@ -216,7 +320,7 @@ module Core
 
       if @comment.save
         flash[:notice] = 'Комментарий сохранён.'
-        redirect_to url_for(controller: '/core/admin/analytics', action: :create_comment)
+        redirect_to url_for(controller: '/core/admin/analytics', action: :index, tab: 'comments', cluster_id: @comment.cluster_id)
       else
         flash.now[:alert] = 'Не удалось сохранить комментарий.'
         index

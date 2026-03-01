@@ -43,13 +43,12 @@ hr
   .panel-body
     - from_val = params[:from].presence || (@from && @from.strftime('%Y-%m-%d %H:%M'))
     - to_val   = params[:to].presence   || (@to && @to.strftime('%Y-%m-%d %H:%M'))
-    - metric_val = params[:metric].presence || (@metric || 'idle')
+    / - metric_val = params[:metric].presence || (@metric || 'idle')
 
     = form_with url: url_for(controller: '/core/admin/analytics', action: :availability),
                 method: :get,
                 local: true,
-                data: { turbo: false },
-                html: { class: 'availability-filters' } do
+                html: { class: 'availability-filters', data: { turbo: false, turbolinks: false } } do
       .form-group
         label С
         = text_field_tag :from, from_val, class: 'form-control datetimepicker', autocomplete: 'off', placeholder: 'YYYY-MM-DD HH:MM'
@@ -58,13 +57,13 @@ hr
         label По
         = text_field_tag :to, to_val, class: 'form-control datetimepicker', autocomplete: 'off', placeholder: 'YYYY-MM-DD HH:MM'
 
-      .form-group
-        label Что считать “доступными”
-        = select_tag :metric,
-                     options_for_select([['Свободные (idle)', 'idle'],
-                                         ['В строю (alloc + idle)', 'work'],
-                                         ['Поднятые (total - down/drain/maint/...)', 'up']], metric_val),
-                     class: 'form-control'
+      / .form-group
+      /   label Что считать “доступными”
+      /   = select_tag :metric,
+      /                options_for_select([['Свободные (idle)', 'idle'],
+      /                                    ['В строю (alloc + idle)', 'work'],
+      /                                    ['Поднятые (total - down/drain/maint/...)', 'up']], metric_val),
+      /                class: 'form-control'
 
       .form-group
         = submit_tag 'Показать', class: 'btn btn-primary'
@@ -98,7 +97,7 @@ hr
                                  cluster_id: cluster.id,
                                  from: from_val,
                                  to: to_val,
-                                 metric: metric_val)
+                                 metric: 'states')
             canvas.availability-chart id="availability_chart_#{cluster.id}" data-url=data_url
 
 javascript:
@@ -152,7 +151,7 @@ javascript:
       return out;
     }
 
-    function buildAnnotations(comments, maxY) {
+    function buildAnnotations(comments, maxY, minMs, maxMs) {
       var groups = { info: [], warning: [], incident: [] };
 
       comments.forEach(function(c) {
@@ -163,13 +162,17 @@ javascript:
         var toMs   = Date.parse(c.to);
 
         if (isNaN(fromMs) || isNaN(toMs)) return;
+
+        fromMs = Math.max(fromMs, minMs);
+        toMs   = Math.min(toMs, maxMs);
+
         if (toMs <= fromMs) return;
 
         groups[sev].push({ fromMs: fromMs, toMs: toMs });
       });
 
+      // дальше твой код без изменений...
       var annotations = {};
-
       Object.keys(groups).forEach(function(sev) {
         var merged = mergeIntervals(groups[sev]);
         merged.forEach(function(it, idx) {
@@ -180,11 +183,9 @@ javascript:
             xMax: new Date(it.toMs),
             yMin: 0,
             yMax: maxY,
-
             backgroundColor: sevBg(sev),
             borderColor: sevBorder(sev),
             borderWidth: 1,
-
             drawTime: 'beforeDatasetsDraw'
           };
         });
@@ -250,24 +251,94 @@ javascript:
 
       var payload = await resp.json();
 
+      var series = payload.series || null;
+      var states = payload.states || (series ? Object.keys(series) : []);
+
       console.log('[availability_data]', url, {
         total_nodes: payload.total_nodes,
-        points_len: (payload.points || []).length,
-        first_point: (payload.points || [])[0],
+        metric: payload.metric,
+        states: states,
+        has_series: !!series,
         comments_len: (payload.comments || []).length
       });
 
-      var points = (payload.points || []).map(function(p) {
-        return { x: p.x, y: p.y };
-      });
+      // Подписи статусов
+      var STATE_LABELS = {
+        alloc: 'Заняты (alloc)',
+        idle: 'Свободны (idle)',
+        mix: 'Частично заняты (mix)',
+        comp: 'Завершают работу (comp)',
+        drain: 'Выведены из работы (drain)',
+        drng: 'Выводятся из работы (drng)',
+        down: 'Недоступны (down)',
+        maint: 'Обслуживание (maint)',
+        reserved: 'Зарезервированы (reserved)'
+      };
 
-      if (!points.length) {
+      // Разные цвета линий
+      var STATE_COLORS = {
+        alloc: '#1f77b4',
+        idle: '#2ca02c',
+        mix: '#ff7f0e',
+        comp: '#9467bd',
+        drain: '#d62728',
+        drng: '#8c564b',
+        down: '#7f7f7f',
+        maint: '#17becf',
+        reserved: '#bcbd22'
+      };
+
+      var FALLBACK = ['#1f77b4','#2ca02c','#ff7f0e','#9467bd','#d62728','#8c564b','#7f7f7f','#17becf','#bcbd22','#e377c2'];
+
+      function stateLabel(st) {
+        var s = (st || '').toString();
+        return STATE_LABELS[s] || (s + ' (' + s + ')');
+      }
+
+      function stateColor(st, idx) {
+        var s = (st || '').toString();
+        return STATE_COLORS[s] || FALLBACK[idx % FALLBACK.length];
+      }
+
+      var datasets = [];
+      var maxPointY = 0;
+
+      if (series && states.length) {
+        states.forEach(function(st, idx) {
+          var pts = (series[st] || []).map(function(p) { return { x: p.x, y: p.y }; });
+          if (!pts.length) return;
+
+          for (var i = 0; i < pts.length; i++) {
+            if (pts[i].y > maxPointY) maxPointY = pts[i].y;
+          }
+
+          var col = stateColor(st, idx);
+
+          datasets.push({
+            label: stateLabel(st),
+            data: pts,
+            showLine: true,
+            tension: 0,
+            borderWidth: 2,
+            pointRadius: 2,
+            pointHoverRadius: 5,
+            pointHitRadius: 10,
+            pointBorderWidth: 1,
+            pointBackgroundColor: col,
+            pointBorderColor: col,
+            borderColor: col,
+            backgroundColor: col
+          });
+        });
+      }
+
+      if (!datasets.length) {
         if (canvas._chartInstance) {
           canvas._chartInstance.destroy();
           canvas._chartInstance = null;
         }
 
-        var wrap = canvas.parentElement; 
+        var wrap = canvas.parentElement;
         if (wrap) {
           wrap.classList.add('availability-empty');
           canvas.style.display = 'none';
@@ -296,55 +367,35 @@ javascript:
       var comments   = payload.comments || [];
       var totalNodes = payload.total_nodes || 0;
 
-      var maxPointY = 0;
-      for (var i = 0; i < points.length; i++) {
-        if (points[i].y > maxPointY) maxPointY = points[i].y;
-      }
-
       var maxY = Math.max(totalNodes, maxPointY, 1);
-      var annotations = buildAnnotations(comments, maxY);
+      var minX = payload.from; // ISO8601
+      var maxX = payload.to;
+      var minMs = Date.parse(minX);
+      var maxMs = Date.parse(maxX);
+      var annotations = buildAnnotations(comments, maxY, minMs, maxMs);
 
-      if (canvas._chartInstance) canvas._chartInstance.destroy();
+      if (canvas._chartInstance) canvas._chartInstance.destroy();     
 
       var ctx = canvas.getContext('2d');
 
       var chart = new Chart(ctx, {
         type: 'line',
-        data: {
-          datasets: [{
-            label: 'Активных узлов',
-            data: points,
-
-            showLine: true,
-            tension: 0,
-            borderWidth: 2,
-
-            pointRadius: 3,
-            pointHoverRadius: 5,
-            pointHitRadius: 8,
-
-            borderColor: '#0b3aa4',
-            pointBackgroundColor: '#d40000',
-            pointBorderColor: '#d40000'
-          }]
-        },
+        data: { datasets: datasets },
         options: {
           responsive: true,
           maintainAspectRatio: false,
           interaction: { mode: 'index', intersect: false },
-
           scales: {
             x: {
               type: 'time',
+              min: minX,
+              max: maxX,
               time: {
                 unit: 'day',
                 displayFormats: { day: 'dd.MM' },
                 tooltipFormat: 'dd.MM.yyyy HH:mm'
               },
-              ticks: {
-                autoSkip: true,
-                maxTicksLimit: 12
-              }
+              ticks: { autoSkip: true, maxTicksLimit: 12 }
             },
             y: {
               beginAtZero: true,
@@ -352,15 +403,9 @@ javascript:
               title: { display: true, text: 'Количество узлов' }
             }
           },
-
           plugins: {
-            legend: {
-              display: true,
-              labels: { boxWidth: 30 }
-            },
-            annotation: {
-              annotations: annotations
-            }
+            legend: { display: true, labels: { boxWidth: 30 } },
+            annotation: { annotations: annotations }
           }
         }
       });
@@ -411,8 +456,33 @@ javascript:
       });
     }
 
+    function forceFullReloadOnShow() {
+      var form = document.querySelector('form.availability-filters');
+      if (!form) return;
+
+      form.addEventListener('submit', function(e) {
+        // гарантируем, что Turbo/Turbolinks не перехватят сабмит
+        e.preventDefault();
+
+        var params = new URLSearchParams(new FormData(form));
+
+        // лишнее можно убрать, чтобы URL был чище
+        params.delete('commit');
+
+        // чтобы браузер не отдавал кэшированный ответ
+        params.set('_ts', Date.now().toString());
+
+        var action = form.getAttribute('action') || window.location.pathname;
+        var nextUrl = action + '?' + params.toString();
+
+        // полноценная навигация/перезагрузка
+        window.location.assign(nextUrl);
+      });
+    }
+
     function initAll() {
       initDateTimePickers();
+      forceFullReloadOnShow();
       initCharts();
     }
 
