@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_02_10_235005) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_02_001700) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -446,8 +446,13 @@ ActiveRecord::Schema[8.0].define(version: 2026_02_10_235005) do
     t.datetime "created_at", precision: nil, null: false
     t.datetime "updated_at", precision: nil, null: false
     t.integer "cluster_id", null: false
+    t.integer "reason_group_id"
+    t.integer "reason_id"
     t.index ["author_id"], name: "index_core_comments_on_author_id"
     t.index ["cluster_id"], name: "index_core_comments_on_cluster_id"
+    t.index ["reason_group_id", "reason_id"], name: "index_core_comments_on_reason_group_id_and_reason_id"
+    t.index ["reason_group_id"], name: "index_core_comments_on_reason_group_id"
+    t.index ["reason_id"], name: "index_core_comments_on_reason_id"
     t.index ["system_id"], name: "index_core_comments_on_system_id"
     t.index ["tag_keys"], name: "index_core_comments_on_tag_keys", using: :gin
     t.index ["valid_from"], name: "index_core_comments_on_valid_from"

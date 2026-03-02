@@ -50,6 +50,65 @@
           p.help-block style="margin-top: 6px;"
             | Комментарий привязывается к системе и (опционально) к конкретным узлам.
 
+          ruby:
+            reason_groups = Core::Comments::Comment::REASON_GROUPS || []
+
+            selected_group_id =
+              ((@comment&.reason_group_id).presence ||
+              params.dig(:comment, :reason_group_id) ||
+              params.dig(:comments_comment, :reason_group_id)).to_s
+
+            selected_reason_id =
+              ((@comment&.reason_id).presence ||
+              params.dig(:comment, :reason_id) ||
+              params.dig(:comments_comment, :reason_id)).to_s
+
+            if reason_groups.blank?
+              logger.error("Ошибка: нет данных для групп причин")
+              reason_groups = []
+            end
+
+            reason_options = reason_groups.flat_map do |group|
+              reasons = group[:reasons] || []
+              if reasons.blank?
+                logger.error("Ошибка: нет причин в группе #{group[:name]}")
+                reasons = []
+              end
+
+              reasons.map do |r|
+                [group[:id].to_s, group[:name].to_s, r[:id].to_s, r[:name].to_s]
+              end
+            end
+
+            reason_options_json = reason_options.to_json
+
+          .form-group
+            = f.label :reason_group_id do
+              | Категория
+              span.required-asterisk title="Обязательное поле" *
+            = f.select :reason_group_id,
+                      reason_groups.map { |g| [g[:name], g[:id]] },
+                      { include_blank: 'Выберите категорию', selected: selected_group_id },
+                      class: 'form-control',
+                      required: true,
+                      id: 'comment_reason_group_id'
+
+          - selected_group = reason_groups.find { |g| g[:id].to_s == selected_group_id.to_s }
+          - reasons_for_group = selected_group ? selected_group[:reasons] : []
+          - reason_blank = selected_group ? 'Выберите причину' : 'Сначала выберите категорию'
+
+          .form-group
+            = f.label :reason_id do
+              | Причина
+              span.required-asterisk title="Обязательное поле" *
+            = f.select :reason_id,
+                      options_for_select(reasons_for_group.map { |r| [r[:name], r[:id].to_s] }, selected_reason_id.to_s),
+                      { include_blank: reason_blank },
+                      class: 'form-control',
+                      required: true,
+                      id: 'comment_reason_id',
+                      data: { selected: selected_reason_id, reasons: reason_options_json }
+
         .form-group
           = f.label :title do
             | Заголовок
@@ -94,7 +153,7 @@
               - severity_options = Core::Comments::Comment.severities.keys.map { |k| [severity_labels[k] || k, k] }
               = f.select :severity,
                          severity_options,
-                         {},
+                         {} ,
                          class: 'form-control'
 
         .row
@@ -133,58 +192,10 @@
                           = check_box_tag 'comment[node_ids][]', node.id, checked, id: "comment_node_#{node.id}"
                           = label
 
-          .col-md-6.col-sm-12
-            .form-group.section-header
-              h4 style="margin-bottom: 8px;" Теги (опционально)
-
-              .form-group style="margin-bottom: 10px;"
-                = label_tag 'comment[new_tags]', 'Добавить новый тег'
-                = text_field_tag 'comment[new_tags]',
-                                 '',
-                                 class: 'form-control',
-                                 placeholder: 'Например: сеть, охлаждение, апгрейд'
-                p.help-block style="margin-top: 6px;"
-                  | Можно несколько через запятую. Они сохранятся в справочник (группа «Пользовательские») и привяжутся к комментарию.
-
-              #tag_checkboxes_container
-                = hidden_field_tag 'comment[tag_ids][]', ''
-
-                - tag_groups = (@tag_groups || [])
-                - if tag_groups.blank?
-                  p.text-muted Справочник тегов пустой. Новые теги всё равно можно добавить через поле выше.
-                - else
-                  - tag_groups.each do |group|
-                    - next unless group.is_active
-                    - group_tags = group.tags.select(&:is_active).sort_by { |t| [t.sort_order.to_i, t.label.to_s] }
-                    - next if group_tags.blank?
-
-                    .panel.panel-default style="margin-bottom: 10px;"
-                      .panel-heading
-                        strong = group.name
-                      .panel-body
-                        .row
-                          - group_tags.each do |tag|
-                            - checked = @comment.respond_to?(:tag_ids) ? @comment.tag_ids.include?(tag.id) : false
-                            .col-md-6.col-sm-6
-                              .checkbox
-                                label
-                                  = check_box_tag 'comment[tag_ids][]',
-                                                  tag.id,
-                                                  checked,
-                                                  id: "comment_tag_#{tag.id}"
-                                  = tag.label
-
         .form-group style="margin-top: 15px;"
           = f.submit 'Сохранить', class: 'btn btn-primary'
           = button_tag 'Очистить', type: 'reset', class: 'btn btn-default', style: 'margin-left: 8px;'
 
-  hr
-
-  .alert.alert-success#tags_notice style="display:none; margin-top: 10px;"
-  .alert.alert-danger#tags_alert style="display:none; margin-top: 10px;"
-
-  #tag_manage_container
-    = render 'core/admin/analytics/tags_manage', tag_groups: @tag_groups, tag_usage: @tag_usage
 
   .panel.panel-default style="margin-top: 20px;"
     .panel-heading
@@ -294,13 +305,57 @@
           document.addEventListener('turbolinks:load', initDateTimePickers);
         })();
 
+- groups_json = Core::Comments::Comment::REASON_GROUPS.to_json
+script#reason_groups_json type="application/json"
+  = raw(groups_json)
+
 javascript:
   (function() {
+    function initReasonSelects() {
+      var groupEl  = document.getElementById('comment_reason_group_id');
+      var reasonEl = document.getElementById('comment_reason_id');
+      if (!groupEl || !reasonEl || groupEl.dataset.bound === '1') return;
+      groupEl.dataset.bound = '1';
+
+      var allReasons = JSON.parse(reasonEl.dataset.reasons);
+
+      function fill() {
+        var gid = (groupEl.value || '').trim();
+
+        reasonEl.innerHTML = '';
+
+        var opt0 = document.createElement('option');
+        opt0.value = '';
+        opt0.textContent = gid ? 'Выберите причину' : 'Сначала выберите категорию';
+        reasonEl.appendChild(opt0);
+
+        var filteredReasons = allReasons.filter(function(r) {
+          return r[0] === gid;
+        });
+
+        filteredReasons.forEach(function(r) {
+          var opt = document.createElement('option');
+          opt.value = r[2];       // reason_id
+          opt.textContent = r[3]; // reason_name
+          reasonEl.appendChild(opt);
+        });
+
+        if (reasonEl.dataset.selected) {
+          reasonEl.value = reasonEl.dataset.selected;
+        }
+      }
+
+      groupEl.addEventListener('change', function() {
+        fill();
+      });
+
+      fill();
+    }
+
     function init() {
       var select = document.getElementById('comment_cluster_id');
       var hidden = document.getElementById('reload_cluster_id');
 
-      // синхроним скрытое поле (оно участвует в GET форме кнопки)
       if (select && hidden) {
         function syncHidden() {
           hidden.value = (select.value || '').trim();
@@ -308,7 +363,6 @@ javascript:
 
         select.addEventListener('change', syncHidden);
 
-        // если select2 подключен — слушаем и его события
         if (window.jQuery && window.jQuery.fn && window.jQuery.fn.select2) {
           window.jQuery(select).on('select2:select select2:clear', syncHidden);
         }
@@ -316,7 +370,6 @@ javascript:
         syncHidden();
       }
 
-      // поиск по узлам
       var qEl = document.getElementById('node_search_input');
       if (qEl && qEl.dataset.searchBound !== '1') {
         qEl.dataset.searchBound = '1';
@@ -330,9 +383,16 @@ javascript:
           });
         });
       }
+      if (window.jQuery) {
+        window.jQuery('a[data-toggle="tab"]').on('shown.bs.tab', function (e) {
+          var href = window.jQuery(e.target).attr('href');
+          if (href === '#comments_tab') initReasonSelects();
+        });
+      }
     }
 
     document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('DOMContentLoaded', initReasonSelects);
     document.addEventListener('turbolinks:load', init);
     document.addEventListener('turbo:load', init);
   })();

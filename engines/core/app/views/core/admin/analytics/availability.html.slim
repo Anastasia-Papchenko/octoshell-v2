@@ -171,7 +171,6 @@ javascript:
         groups[sev].push({ fromMs: fromMs, toMs: toMs });
       });
 
-      // дальше твой код без изменений...
       var annotations = {};
       Object.keys(groups).forEach(function(sev) {
         var merged = mergeIntervals(groups[sev]);
@@ -262,7 +261,6 @@ javascript:
         comments_len: (payload.comments || []).length
       });
 
-      // Подписи статусов
       var STATE_LABELS = {
         alloc: 'Заняты (alloc)',
         idle: 'Свободны (idle)',
@@ -275,7 +273,6 @@ javascript:
         reserved: 'Зарезервированы (reserved)'
       };
 
-      // Разные цвета линий
       var STATE_COLORS = {
         alloc: '#1f77b4',
         idle: '#2ca02c',
@@ -461,21 +458,17 @@ javascript:
       if (!form) return;
 
       form.addEventListener('submit', function(e) {
-        // гарантируем, что Turbo/Turbolinks не перехватят сабмит
         e.preventDefault();
 
         var params = new URLSearchParams(new FormData(form));
 
-        // лишнее можно убрать, чтобы URL был чище
         params.delete('commit');
 
-        // чтобы браузер не отдавал кэшированный ответ
         params.set('_ts', Date.now().toString());
 
         var action = form.getAttribute('action') || window.location.pathname;
         var nextUrl = action + '?' + params.toString();
 
-        // полноценная навигация/перезагрузка
         window.location.assign(nextUrl);
       });
     }

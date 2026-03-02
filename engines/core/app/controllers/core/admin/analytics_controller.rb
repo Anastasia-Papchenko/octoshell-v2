@@ -91,7 +91,6 @@ module Core
       to     = parse_time(params[:to])   || Time.current
       metric = params[:metric].presence || 'idle'
 
-      # ВАЖНО: берем число узлов из аналитической таблицы, а не из cluster.nodes
       total_nodes = Core::Analytics::Node.where(cluster_id: cluster.id).count
 
       snaps = cluster.snapshots
@@ -130,7 +129,6 @@ module Core
       snap_ids   = snaps.map(&:id)
       snap_times = snaps.map(&:captured_at)
 
-      # Для старых метрик оставляем старое поведение (на всякий случай)
       if metric != 'states'
         counts =
           Core::Analytics::NodeState
@@ -166,13 +164,9 @@ module Core
         }
       end
 
-      # ---------------------------
-      # metric == 'states' (НОВОЕ)
-      # ---------------------------
 
       first_ts = snaps.first.captured_at
 
-      # База: сколько узлов в каких состояниях на первом снимке (это "срез", а не "дельта")
       base_counts =
         Core::Analytics::NodeState
           .at(first_ts)
@@ -181,11 +175,9 @@ module Core
           .count
           .transform_keys(&:to_s)
 
-      # total_nodes логичнее взять как сумму состояний на первом срезе, если она > 0
       base_total = base_counts.values.sum
       total_nodes = base_total if base_total > 0
 
-      # enter: сколько узлов ПЕРЕШЛО в состояние на снимке (новые интервалы)
       enter_raw =
         Core::Analytics::NodeState
           .where(cluster_id: cluster.id, snapshot_id: snap_ids)
@@ -197,7 +189,6 @@ module Core
         enter_by_snap[sid][st.to_s] = cnt.to_i
       end
 
-      # leave: сколько узлов ВЫШЛО из состояния в момент captured_at (закрытие интервала valid_to)
       leave_raw =
         Core::Analytics::NodeState
           .where(cluster_id: cluster.id, valid_to: snap_times)
@@ -209,17 +200,14 @@ module Core
         leave_by_time[t][st.to_s] = cnt.to_i
       end
 
-      # какие состояния показывать: берём из модели + что реально встречается
       states = (Core::Analytics::NodeState::STATES.map(&:to_s) + base_counts.keys).uniq
 
-      # текущие счётчики
       cur = Hash.new(0)
       base_counts.each { |st, cnt| cur[st] = cnt.to_i }
 
       series = Hash.new { |h, k| h[k] = [] }
 
       snaps.each_with_index do |s, idx|
-        # для 1-го снимка уже есть base (NodeState.at(first_ts))
         if idx > 0
           t = s.captured_at
 
@@ -238,7 +226,6 @@ module Core
         end
       end
 
-      # убрать совсем нулевые линии, чтобы легенда не была мусорной
       states.select! do |st|
         series[st].any? { |p| p[:y].to_i > 0 }
       end
@@ -314,9 +301,6 @@ module Core
 
       @comment = Core::Comments::Comment.new(comment_params)
       @comment.author = current_user
-
-      new_tag_ids = ensure_custom_tags(custom_tag_labels_from_params)
-      @comment.tag_ids = (@comment.tag_ids + new_tag_ids).uniq if new_tag_ids.any?
 
       if @comment.save
         flash[:notice] = 'Комментарий сохранён.'
@@ -405,12 +389,14 @@ module Core
         :valid_from,
         :valid_to,
         :severity,
-        node_ids: [],
-        tag_ids: []
+        :reason_group_id,
+        :reason_id,
+        node_ids: []
       )
 
       permitted[:node_ids] = Array(permitted[:node_ids]).reject(&:blank?).map(&:to_i).uniq
-      permitted[:tag_ids]  = Array(permitted[:tag_ids]).reject(&:blank?).map(&:to_i).uniq
+      permitted[:reason_group_id] = permitted[:reason_group_id].presence&.to_i
+      permitted[:reason_id] = permitted[:reason_id].presence&.to_i
 
       permitted
     end
@@ -447,9 +433,6 @@ module Core
     end
 
     def prepare_comments
-      @tag_groups = Core::Comments::TagGroup.includes(:tags).order(:sort_order, :id)
-      @tag_usage  = Core::Comments::CommentTag.group(:tag_id).count
-
       @comment ||= Core::Comments::Comment.new(valid_from: Time.current)
 
       @nodes = Core::Analytics::Node
@@ -457,7 +440,7 @@ module Core
                .order(:cluster_id, :prefix, :hostname)
 
       rel = Core::Comments::Comment
-            .includes(:author, :cluster, :tags, :nodes)
+            .includes(:author, :cluster, :nodes)
             .recent_first
 
       rel = rel.where(cluster_id: params[:cluster_id]) if params[:cluster_id].present?
