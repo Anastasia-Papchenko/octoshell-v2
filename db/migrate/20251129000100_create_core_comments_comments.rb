@@ -17,7 +17,7 @@ class CreateCoreCommentsComments < ActiveRecord::Migration[5.2]
               name: 'index_core_comments_on_system_id_and_valid_from'
     add_index :core_comments, [:cluster_id, :valid_to],
               name: 'index_core_comments_on_system_id_and_valid_to'
-    add_index :core_comments, [:cluster_id :severity],
+    add_index :core_comments, [:cluster_id, :severity],
               name: 'index_core_comments_on_system_id_and_severity'
 
     add_index :core_comments, :cluster_id,
