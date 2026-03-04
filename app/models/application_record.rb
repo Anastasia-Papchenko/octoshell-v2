@@ -7,13 +7,13 @@ class ApplicationRecord < ActiveRecord::Base
     super
   end
 
-  # def self.versions_enabled
-  #   true
-  # end
   def self.versions_enabled
-    pk = primary_key
-    !(pk.nil? || pk.to_s.empty?)
+    true
   end
+  # def self.versions_enabled
+  #   pk = primary_key
+  #   !(pk.nil? || pk.to_s.empty?)
+  # end
 
 
   self.abstract_class = true

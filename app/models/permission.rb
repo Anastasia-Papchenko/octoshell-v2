@@ -3,8 +3,8 @@
 # Table name: permissions
 #
 #  id            :integer          not null, primary key
-#  action        :string(255)
-#  subject_class :string(255)
+#  action        :string
+#  subject_class :string
 #  group_id      :integer
 #  available     :boolean          default("false")
 #  created_at    :datetime

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.0].define(version: 2026_03_02_001700) do
+ActiveRecord::Schema[8.0].define(version: 2026_03_04_232108) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
 
@@ -449,6 +449,10 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_02_001700) do
     t.integer "reason_group_id"
     t.integer "reason_id"
     t.index ["author_id"], name: "index_core_comments_on_author_id"
+    t.index ["cluster_id", "severity"], name: "index_core_comments_on_cluster_id_and_severity"
+    t.index ["cluster_id", "valid_from"], name: "index_core_comments_on_cluster_id_and_valid_from"
+    t.index ["cluster_id", "valid_to"], name: "index_core_comments_on_cluster_id_and_valid_to"
+    t.index ["cluster_id"], name: "index_core_comments_current_open_ended_on_cluster_id", where: "(valid_to IS NULL)"
     t.index ["cluster_id"], name: "index_core_comments_on_cluster_id"
     t.index ["reason_group_id", "reason_id"], name: "index_core_comments_on_reason_group_id_and_reason_id"
     t.index ["reason_group_id"], name: "index_core_comments_on_reason_group_id"
@@ -931,6 +935,55 @@ ActiveRecord::Schema[8.0].define(version: 2026_03_02_001700) do
     t.boolean "system"
     t.datetime "created_at", precision: nil
     t.datetime "updated_at", precision: nil
+  end
+
+  create_table "hardware_items", id: :serial, force: :cascade do |t|
+    t.string "name_ru"
+    t.string "name_en"
+    t.text "description_ru"
+    t.text "description_en"
+    t.integer "lock_version"
+    t.integer "kind_id"
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+  end
+
+  create_table "hardware_items_states", id: :serial, force: :cascade do |t|
+    t.integer "item_id"
+    t.integer "state_id"
+    t.text "reason_en"
+    t.text "reason_ru"
+    t.text "description_en"
+    t.text "description_ru"
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+  end
+
+  create_table "hardware_kinds", id: :serial, force: :cascade do |t|
+    t.string "name_ru"
+    t.string "name_en"
+    t.text "description_ru"
+    t.text "description_en"
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+  end
+
+  create_table "hardware_states", id: :serial, force: :cascade do |t|
+    t.string "name_ru"
+    t.string "name_en"
+    t.text "description_ru"
+    t.text "description_en"
+    t.integer "lock_version"
+    t.integer "kind_id"
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+  end
+
+  create_table "hardware_states_links", id: :serial, force: :cascade do |t|
+    t.integer "from_id"
+    t.integer "to_id"
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
   end
 
   create_table "jobstat_data_types", id: :serial, force: :cascade do |t|
