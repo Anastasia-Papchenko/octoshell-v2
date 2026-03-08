@@ -106,50 +106,6 @@ module Core
       ActiveRecord::Base.connection.columns(table).any? { |c| c.name == column.to_s }
     end
 
-
-    # def upsert_partitions(partition_names, parsed_lines)
-    #   has_time_limit = column_exists_in_db?(TABLE_PARTITIONS, :time_limit)
-
-    #   limits = {}
-    #   parsed_lines.each { |h| limits[h[:partition]] ||= h[:timelimit] }
-
-    #   map = {}
-    #   partition_names.each_slice(100) do |chunk|
-    #     values = []
-    #     binds  = []
-
-    #     stride = has_time_limit ? 3 : 2
-    #     chunk.each_with_index do |name, i|
-    #       tl   = limits[name]
-    #       base = i * stride
-    #       values << "($#{base+1}, $#{base+2}#{has_time_limit ? ", $#{base+3}" : ""}, NOW(), NOW())"
-    #       binds  << bind_int(@system_id) << bind_str(name)
-    #       binds  << bind_str(tl) if has_time_limit
-    #     end
-
-    #     cols_arr = %w[system_id name]
-    #     cols_arr << 'time_limit' if has_time_limit
-    #     cols_arr += %w[created_at updated_at]
-    #     cols = cols_arr.join(', ')
-
-    #     set_clauses = []
-    #     set_clauses << "time_limit = EXCLUDED.time_limit" if has_time_limit
-    #     set_clauses << "updated_at = EXCLUDED.updated_at"
-
-    #     sql = <<~SQL
-    #       INSERT INTO #{TABLE_PARTITIONS} (#{cols})
-    #       VALUES #{values.join(',')}
-    #       ON CONFLICT (system_id, name) DO UPDATE
-    #         SET #{set_clauses.join(', ')}
-    #       RETURNING id, name
-    #     SQL
-
-    #     res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', binds)
-    #     res.rows.each { |(id, name)| map[name] = id }
-    #   end
-
-    #   map
-    # end
     def upsert_partitions(partition_names, _parsed_lines)
       map = {}
 

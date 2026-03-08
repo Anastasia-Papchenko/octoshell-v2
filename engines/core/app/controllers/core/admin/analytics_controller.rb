@@ -5,7 +5,8 @@ module Core
     before_action :octo_authorize!
     octo_use(:project_class, :core, 'Project')
 
-    before_action :prepare_comments, only: [:index, :create_comment, :sinfo]
+    # before_action :prepare_comments, only: [:index, :create_comment, :sinfo]
+    before_action :prepare_comments, only: [:index, :create_comment]
 
     def index
       @total_reports     = 0
@@ -244,51 +245,29 @@ module Core
     end
 
     def sinfo
-      cluster_id = params[:cluster_id].presence
-      raise ArgumentError, "cluster_id is required" if cluster_id.blank?
-
-      cluster = Core::Cluster.find(cluster_id)
-
-      fetcher = Core::SinfoFetcher.new(
-        host: cluster.host,
-        user: (cluster.admin_login.presence || ENV.fetch("HPC_USER", "papchenko30_2363")),
-        auth: { key_path: File.expand_path("~/.ssh/id_ed25519") }
+      outcome = Core::SinfoRefresh.call(
+        cluster_id: params[:cluster_id],
+        user_id: current_user&.id
       )
 
-      sinfo_log = fetcher.call.to_s
-      raise sinfo_log if sinfo_log.start_with?("SSH error:")
+      if outcome.ok?
+        flash[:notice] = "SINFO загружен. Снимок ##{outcome.snapshot_id}, узлов: #{outcome.nodes_total}"
 
-      result = ActiveRecord::Base.transaction do
-        Core::SinfoIngestor.new(
-          raw_text: sinfo_log,
-          source_cmd: 'sinfo -a',
-          parser_version: 'v1',
-          quiet: true,
-          cluster_id: cluster.id
-        ).call
+        redirect_to url_for(
+          controller: '/core/admin/analytics',
+          action: :index,
+          cluster_id: outcome.cluster_id,
+          snapshot_id: outcome.snapshot_id
+        )
+      else
+        flash[:alert] = "Ошибка загрузки SINFO: #{outcome.error_class}: #{outcome.error_message}"
+
+        redirect_to url_for(
+          controller: '/core/admin/analytics',
+          action: :index,
+          cluster_id: outcome.cluster_id
+        )
       end
-
-      Rails.cache.write(sinfo_cache_key('result'), result, expires_in: 10.minutes)
-
-      flash[:notice] = "SINFO загружен. Снимок ##{result[:snapshot_id]}, узлов: #{result[:nodes_total]}"
-
-      redirect_to url_for(
-        controller: '/core/admin/analytics',
-        action: :index,
-        cluster_id: cluster.id,
-        snapshot_id: result[:snapshot_id]
-      )
-
-    rescue => e
-      Rails.cache.write(
-        sinfo_cache_key('error'),
-        "#{e.class}: #{e.message}\n\n#{e.backtrace.take(20).join("\n")}",
-        expires_in: 10.minutes
-      )
-
-      flash[:alert] = "Ошибка загрузки SINFO: #{e.class}: #{e.message}"
-
-      redirect_to url_for(controller: '/core/admin/analytics', action: :index, cluster_id: cluster_id)
     end
 
     def create_comment
@@ -366,10 +345,6 @@ module Core
       Time.zone.parse(str.to_s)
     rescue StandardError
       nil
-    end
-
-    def sinfo_cache_key(suffix)
-      "analytics:sinfo:#{suffix}:user:#{current_user&.id || 'anon'}"
     end
 
     def comment_params
