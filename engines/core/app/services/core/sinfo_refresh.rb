@@ -11,7 +11,9 @@ module Core
       keyword_init: true
     )
 
-    def self.call(cluster_id:, user_id: nil, cache: Rails.cache, ssh_key_path: nil, hpc_user_env: "HPC_USER", fallback_user: "papchenko30_2363")
+    def self.call(cluster_id:, user_id: nil, cache: Rails.cache, ssh_key_path: nil, 
+      # hpc_user_env: "HPC_USER", fallback_user: "papchenko30_2363"
+      )
       new(
         cluster_id: cluster_id,
         user_id: user_id,
@@ -26,7 +28,7 @@ module Core
       @cluster_id    = cluster_id.to_s.strip
       @user_id       = user_id
       @cache         = cache
-      @ssh_key_path  = File.expand_path(ssh_key_path.presence || "~/.ssh/id_ed25519")
+      # @ssh_key_path  = File.expand_path(ssh_key_path.presence || "~/.ssh/id_ed25519")
       @hpc_user_env  = hpc_user_env
       @fallback_user = fallback_user
     end
@@ -36,10 +38,16 @@ module Core
 
       cluster = Core::Cluster.find(@cluster_id)
 
+      # fetcher = Core::SinfoFetcher.new(
+      #   host: cluster.host,
+      #   user: (cluster.admin_login.presence || ENV.fetch(@hpc_user_env, @fallback_user)),
+      #   auth: { key_path: @ssh_key_path }
+      # )
+
       fetcher = Core::SinfoFetcher.new(
         host: cluster.host,
-        user: (cluster.admin_login.presence || ENV.fetch(@hpc_user_env, @fallback_user)),
-        auth: { key_path: @ssh_key_path }
+        user: cluster.admin_login,
+        auth: { private_key_pem: cluster.private_key }
       )
 
       sinfo_log = fetcher.call.to_s

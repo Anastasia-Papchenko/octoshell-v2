@@ -89,9 +89,9 @@ class User < ApplicationRecord
     @ability ||= Ability.new(self)
   end
 
-  has_many :comments,
-           class_name: 'Core::Comments::Comment',
-           foreign_key: :author_id,
-           inverse_of: :author,
-           dependent: :restrict_with_error
+  # has_many :comments,
+  #          class_name: 'Core::Comments::Comment',
+  #          foreign_key: :author_id,
+  #          inverse_of: :author,
+  #          dependent: :restrict_with_error
 end
