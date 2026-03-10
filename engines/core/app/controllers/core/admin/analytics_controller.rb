@@ -245,9 +245,20 @@ module Core
     end
 
     def sinfo
+      Rails.logger.info("[SINFO] start cluster_id=#{params[:cluster_id]} user_id=#{current_user&.id}")
+
       outcome = Core::SinfoRefresh.call(
         cluster_id: params[:cluster_id],
         user_id: current_user&.id
+      )
+
+      Rails.logger.info(
+        "[SINFO] result ok=#{outcome.ok?} " \
+        "cluster_id=#{outcome.cluster_id} " \
+        "snapshot_id=#{outcome.snapshot_id.inspect} " \
+        "nodes_total=#{outcome.nodes_total.inspect} " \
+        "error_class=#{outcome.error_class.inspect} " \
+        "error_message=#{outcome.error_message.inspect}"
       )
 
       if outcome.ok?

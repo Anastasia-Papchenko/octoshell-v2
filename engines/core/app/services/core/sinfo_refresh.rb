@@ -11,9 +11,14 @@ module Core
       keyword_init: true
     )
 
-    def self.call(cluster_id:, user_id: nil, cache: Rails.cache, ssh_key_path: nil, 
-      # hpc_user_env: "HPC_USER", fallback_user: "papchenko30_2363"
-      )
+    def self.call(
+      cluster_id:,
+      user_id: nil,
+      cache: Rails.cache,
+      ssh_key_path: nil,
+      hpc_user_env: "HPC_USER",
+      fallback_user: "papchenko30_2363"
+    )
       new(
         cluster_id: cluster_id,
         user_id: user_id,
@@ -37,12 +42,7 @@ module Core
       raise ArgumentError, "cluster_id is required" if @cluster_id.blank?
 
       cluster = Core::Cluster.find(@cluster_id)
-
-      # fetcher = Core::SinfoFetcher.new(
-      #   host: cluster.host,
-      #   user: (cluster.admin_login.presence || ENV.fetch(@hpc_user_env, @fallback_user)),
-      #   auth: { key_path: @ssh_key_path }
-      # )
+      Rails.logger.info("[SINFO_REFRESH] cluster=#{cluster.id} host=#{cluster.host.inspect} admin_login=#{cluster.admin_login.inspect}")
 
       fetcher = Core::SinfoFetcher.new(
         host: cluster.host,
@@ -51,6 +51,8 @@ module Core
       )
 
       sinfo_log = fetcher.call.to_s
+      Rails.logger.info("[SINFO_REFRESH] fetched #{sinfo_log.bytesize} bytes")
+
       raise sinfo_log if sinfo_log.start_with?("SSH error:")
 
       result = ActiveRecord::Base.transaction do
@@ -63,6 +65,8 @@ module Core
         ).call
       end
 
+      Rails.logger.info("[SINFO_REFRESH] ingested result=#{result.inspect}")
+
       write_cache(:result, cluster.id, result)
 
       Outcome.new(
@@ -73,6 +77,9 @@ module Core
         result: result
       )
     rescue => e
+      Rails.logger.error("[SINFO_REFRESH] error #{e.class}: #{e.message}")
+      Rails.logger.error(e.backtrace.first(15).join("\n"))
+
       cid = @cluster_id.presence || "none"
       write_cache(:error, cid, format_error(e))
 
