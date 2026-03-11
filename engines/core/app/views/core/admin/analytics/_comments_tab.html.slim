@@ -22,15 +22,46 @@
                  url: url_for(controller: '/core/admin/analytics', action: 'create_comment'),
                  html: { class: 'analytics-comments-form' } do |f|
 
-        .form-group
-          = f.label :cluster_id do
-            | Система
-            span.required-asterisk title="Обязательное поле" *
-          - selected_cluster_id = (@comment && @comment.cluster_id.present?) ? @comment.cluster_id : (params[:cluster_id].presence || params.dig(:comment, :cluster_id).presence)
-          - nodes_reload_url = url_for(controller: '/core/admin/analytics', action: 'index')
+        - selected_cluster_id = (@comment && @comment.cluster_id.present?) ? @comment.cluster_id : (params[:cluster_id].presence || params.dig(:comment, :cluster_id).presence)
 
-          .row
-            .col-md-8.col-sm-12
+        ruby:
+          reason_groups = Core::Comments::Comment::REASON_GROUPS || []
+
+          selected_group_id =
+            ((@comment&.reason_group_id).presence ||
+            params.dig(:comment, :reason_group_id) ||
+            params.dig(:comments_comment, :reason_group_id)).to_s
+
+          selected_reason_id =
+            ((@comment&.reason_id).presence ||
+            params.dig(:comment, :reason_id) ||
+            params.dig(:comments_comment, :reason_id)).to_s
+
+          if reason_groups.blank?
+            logger.error("Ошибка: нет данных для групп причин")
+            reason_groups = []
+          end
+
+          reason_options = reason_groups.flat_map do |group|
+            reasons = group[:reasons] || []
+            if reasons.blank?
+              logger.error("Ошибка: нет причин в группе #{group[:name]}")
+              reasons = []
+            end
+
+            reasons.map do |r|
+              [group[:id].to_s, group[:name].to_s, r[:id].to_s, r[:name].to_s]
+            end
+          end
+
+          reason_options_json = reason_options.to_json
+
+        .row
+          .col-md-4.col-sm-12
+            .form-group
+              = f.label :cluster_id do
+                | Система
+                span.required-asterisk title="Обязательное поле" *
               = f.collection_select :cluster_id,
                                     (@clusters || []),
                                     :id, :name,
@@ -38,76 +69,46 @@
                                     { class: 'form-control',
                                       id: 'comment_cluster_id' }
 
-            .col-md-4.col-sm-12 
+          .col-md-4.col-sm-12
+            .form-group
+              = f.label :reason_group_id do
+                | Категория
+                span.required-asterisk title="Обязательное поле" *
+              = f.select :reason_group_id,
+                         reason_groups.map { |g| [g[:name], g[:id]] },
+                         { include_blank: 'Выберите категорию', selected: selected_group_id },
+                         class: 'form-control',
+                         required: true,
+                         id: 'comment_reason_group_id'
+
+          .col-md-4.col-sm-12
+            .form-group style="margin-top: 25px;"
               = button_tag 'Показать доступные узлы',
-                            type: 'submit',
-                            class: 'btn btn-default',
-                            id: 'reload_nodes_btn',
-                            formmethod: 'get',
-                            formaction: url_for(controller: '/core/admin/analytics', action: 'create_comment'),
-                            formnovalidate: true
+                          type: 'submit',
+                          class: 'btn btn-primary btn-block',
+                          id: 'reload_nodes_btn',
+                          formmethod: 'get',
+                          formaction: url_for(controller: '/core/admin/analytics', action: 'create_comment'),
+                          formnovalidate: true
 
-          p.help-block style="margin-top: 6px;"
-            | Комментарий привязывается к системе и (опционально) к конкретным узлам.
+        p.help-block style="margin-top: 6px;"
+          | Комментарий привязывается к системе и (опционально) к конкретным узлам.
 
-          ruby:
-            reason_groups = Core::Comments::Comment::REASON_GROUPS || []
+        - selected_group = reason_groups.find { |g| g[:id].to_s == selected_group_id.to_s }
+        - reasons_for_group = selected_group ? selected_group[:reasons] : []
+        - reason_blank = selected_group ? 'Выберите причину' : 'Сначала выберите категорию'
 
-            selected_group_id =
-              ((@comment&.reason_group_id).presence ||
-              params.dig(:comment, :reason_group_id) ||
-              params.dig(:comments_comment, :reason_group_id)).to_s
-
-            selected_reason_id =
-              ((@comment&.reason_id).presence ||
-              params.dig(:comment, :reason_id) ||
-              params.dig(:comments_comment, :reason_id)).to_s
-
-            if reason_groups.blank?
-              logger.error("Ошибка: нет данных для групп причин")
-              reason_groups = []
-            end
-
-            reason_options = reason_groups.flat_map do |group|
-              reasons = group[:reasons] || []
-              if reasons.blank?
-                logger.error("Ошибка: нет причин в группе #{group[:name]}")
-                reasons = []
-              end
-
-              reasons.map do |r|
-                [group[:id].to_s, group[:name].to_s, r[:id].to_s, r[:name].to_s]
-              end
-            end
-
-            reason_options_json = reason_options.to_json
-
-          .form-group
-            = f.label :reason_group_id do
-              | Категория
-              span.required-asterisk title="Обязательное поле" *
-            = f.select :reason_group_id,
-                      reason_groups.map { |g| [g[:name], g[:id]] },
-                      { include_blank: 'Выберите категорию', selected: selected_group_id },
-                      class: 'form-control',
-                      required: true,
-                      id: 'comment_reason_group_id'
-
-          - selected_group = reason_groups.find { |g| g[:id].to_s == selected_group_id.to_s }
-          - reasons_for_group = selected_group ? selected_group[:reasons] : []
-          - reason_blank = selected_group ? 'Выберите причину' : 'Сначала выберите категорию'
-
-          .form-group
-            = f.label :reason_id do
-              | Причина
-              span.required-asterisk title="Обязательное поле" *
-            = f.select :reason_id,
-                      options_for_select(reasons_for_group.map { |r| [r[:name], r[:id].to_s] }, selected_reason_id.to_s),
-                      { include_blank: reason_blank },
-                      class: 'form-control',
-                      required: true,
-                      id: 'comment_reason_id',
-                      data: { selected: selected_reason_id, reasons: reason_options_json }
+        .form-group
+          = f.label :reason_id do
+            | Причина
+            span.required-asterisk title="Обязательное поле" *
+          = f.select :reason_id,
+                     options_for_select(reasons_for_group.map { |r| [r[:name], r[:id].to_s] }, selected_reason_id.to_s),
+                     { include_blank: reason_blank },
+                     class: 'form-control',
+                     required: true,
+                     id: 'comment_reason_id',
+                     data: { selected: selected_reason_id, reasons: reason_options_json }
 
         .form-group
           = f.label :title do
@@ -132,19 +133,21 @@
                 span.required-asterisk title="Обязательное поле" *
               - vf = (@comment && @comment.valid_from.present?) ? @comment.valid_from.strftime('%Y-%m-%d %H:%M') : params.dig(:comment, :valid_from).to_s
               = f.text_field :valid_from,
-                            value: vf,
-                            class: 'form-control datetimepicker',
-                            autocomplete: 'off',
-                            placeholder: 'YYYY-MM-DD HH:MM'
+                             value: vf,
+                             class: 'form-control datetimepicker',
+                             autocomplete: 'off',
+                             placeholder: 'YYYY-MM-DD HH:MM'
+
           .col-md-4.col-sm-6
             .form-group
               = f.label :valid_to, 'Действует до (опционально)'
               - vt = (@comment && @comment.valid_to.present?) ? @comment.valid_to.strftime('%Y-%m-%d %H:%M') : params.dig(:comment, :valid_to).to_s
               = f.text_field :valid_to,
-                            value: vt,
-                            class: 'form-control datetimepicker',
-                            autocomplete: 'off',
-                            placeholder: 'YYYY-MM-DD HH:MM'
+                             value: vt,
+                             class: 'form-control datetimepicker',
+                             autocomplete: 'off',
+                             placeholder: 'YYYY-MM-DD HH:MM'
+
           .col-md-4.col-sm-6
             .form-group
               = f.label :severity do
@@ -153,7 +156,7 @@
               - severity_options = Core::Comments::Comment.severities.keys.map { |k| [severity_labels[k] || k, k] }
               = f.select :severity,
                          severity_options,
-                         {} ,
+                         {},
                          class: 'form-control'
 
         .row
@@ -169,12 +172,12 @@
 
               .form-group style="margin-bottom: 8px;"
                 = text_field_tag :node_search,
-                                  '',
-                                  class: 'form-control',
-                                  placeholder: (selected_cluster_id.present? ? 'Поиск узла: hostname / prefix (например n4500)' : 'Сначала выберите систему'),
-                                  id: 'node_search_input',
-                                  disabled: selected_cluster_id.blank?
-                    
+                                 '',
+                                 class: 'form-control',
+                                 placeholder: (selected_cluster_id.present? ? 'Поиск узла: hostname / prefix (например n4500)' : 'Сначала выберите систему'),
+                                 id: 'node_search_input',
+                                 disabled: selected_cluster_id.blank?
+
               - if selected_cluster_id.blank?
                 p.text-muted Выберите систему выше — тогда появится список узлов.
               - elsif all_nodes.blank?
@@ -195,7 +198,6 @@
         .form-group style="margin-top: 15px;"
           = f.submit 'Сохранить', class: 'btn btn-primary'
           = button_tag 'Очистить', type: 'reset', class: 'btn btn-default', style: 'margin-left: 8px;'
-
 
   .panel.panel-default style="margin-top: 20px;"
     .panel-heading
@@ -335,8 +337,8 @@ javascript:
 
         filteredReasons.forEach(function(r) {
           var opt = document.createElement('option');
-          opt.value = r[2];       // reason_id
-          opt.textContent = r[3]; // reason_name
+          opt.value = r[2];
+          opt.textContent = r[3];
           reasonEl.appendChild(opt);
         });
 
@@ -346,6 +348,7 @@ javascript:
       }
 
       groupEl.addEventListener('change', function() {
+        reasonEl.dataset.selected = '';
         fill();
       });
 
@@ -353,23 +356,6 @@ javascript:
     }
 
     function init() {
-      var select = document.getElementById('comment_cluster_id');
-      var hidden = document.getElementById('reload_cluster_id');
-
-      if (select && hidden) {
-        function syncHidden() {
-          hidden.value = (select.value || '').trim();
-        }
-
-        select.addEventListener('change', syncHidden);
-
-        if (window.jQuery && window.jQuery.fn && window.jQuery.fn.select2) {
-          window.jQuery(select).on('select2:select select2:clear', syncHidden);
-        }
-
-        syncHidden();
-      }
-
       var qEl = document.getElementById('node_search_input');
       if (qEl && qEl.dataset.searchBound !== '1') {
         qEl.dataset.searchBound = '1';
@@ -383,8 +369,9 @@ javascript:
           });
         });
       }
+
       if (window.jQuery) {
-        window.jQuery('a[data-toggle="tab"]').on('shown.bs.tab', function (e) {
+        window.jQuery('a[data-toggle="tab"]').on('shown.bs.tab', function(e) {
           var href = window.jQuery(e.target).attr('href');
           if (href === '#comments_tab') initReasonSelects();
         });
@@ -394,5 +381,7 @@ javascript:
     document.addEventListener('DOMContentLoaded', init);
     document.addEventListener('DOMContentLoaded', initReasonSelects);
     document.addEventListener('turbolinks:load', init);
+    document.addEventListener('turbolinks:load', initReasonSelects);
     document.addEventListener('turbo:load', init);
+    document.addEventListener('turbo:load', initReasonSelects);
   })();
