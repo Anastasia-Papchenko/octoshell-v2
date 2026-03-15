@@ -108,26 +108,44 @@ module Core
 
     def upsert_partitions(partition_names, _parsed_lines)
       map = {}
+      names = partition_names.to_a
 
-      partition_names.each_slice(200) do |chunk|
+      return map if names.empty?
+
+      names.each_slice(500) do |chunk|
+        placeholders = chunk.each_index.map { |i| "$#{i + 2}" }.join(", ")
+        binds = [bind_int(@cluster_id)] + chunk.map { |name| bind_str(name) }
+
+        sql = <<~SQL
+          SELECT id, name
+          FROM #{TABLE_PARTITIONS}
+          WHERE cluster_id = $1
+            AND name IN (#{placeholders})
+        SQL
+
+        res = ActiveRecord::Base.connection.exec_query(sql, "SQL", binds)
+        res.rows.each { |(id, name)| map[name] = id }
+      end
+
+      missing = names - map.keys
+
+      missing.each_slice(200) do |chunk|
         values = []
         binds  = []
 
         chunk.each_with_index do |name, i|
           base = i * 2
-          values << "($#{base+1}, $#{base+2}, NOW(), NOW())"
+          values << "($#{base + 1}, $#{base + 2})"
           binds << bind_int(@cluster_id) << bind_str(name)
         end
 
         sql = <<~SQL
-          INSERT INTO #{TABLE_PARTITIONS} (cluster_id, name, created_at, updated_at)
-          VALUES #{values.join(',')}
-          ON CONFLICT (cluster_id, name) DO UPDATE
-            SET updated_at = EXCLUDED.updated_at
+          INSERT INTO #{TABLE_PARTITIONS} (cluster_id, name)
+          VALUES #{values.join(", ")}
           RETURNING id, name
         SQL
 
-        res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', binds)
+        res = ActiveRecord::Base.connection.exec_query(sql, "SQL", binds)
         res.rows.each { |(id, name)| map[name] = id }
       end
 

@@ -2,18 +2,17 @@
 # of editing this file, please use the migrations feature of Active Record to
 # incrementally modify your database, and then regenerate this schema definition.
 #
-# Note that this schema.rb definition is the authoritative source for your
-# database schema. If you need to create the application database on another
-# system, you should be using db:schema:load, not running all the migrations
-# from scratch. The latter is a flawed and unsustainable approach (the more migrations
-# you'll amass, the slower it'll run and the greater likelihood for issues).
+# This file is the source Rails uses to define your schema when running `bin/rails
+# db:schema:load`. When creating a new database, `bin/rails db:schema:load` tends to
+# be faster and is potentially less error prone than running all of your
+# migrations from scratch. Old migrations may fail to apply correctly if those
+# migrations use external dependencies or application code.
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema.define(version: 2025_03_31_194719) do
-
+ActiveRecord::Schema[8.0].define(version: 2026_03_04_232108) do
   # These are extensions that must be enabled in order to support this database
-  enable_extension "plpgsql"
+  enable_extension "pg_catalog.plpgsql"
 
   create_table "announcement_recipients", id: :serial, force: :cascade do |t|
     t.integer "user_id"
@@ -337,6 +336,50 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
     t.index ["project_id"], name: "index_core_accesses_on_project_id"
   end
 
+  create_table "core_analytics_node_states", force: :cascade do |t|
+    t.bigint "cluster_id", null: false
+    t.bigint "snapshot_id", null: false
+    t.bigint "node_id", null: false
+    t.bigint "partition_id", null: false
+    t.string "state", null: false
+    t.string "substate"
+    t.boolean "has_reason", default: false, null: false
+    t.datetime "valid_from", precision: nil, null: false
+    t.datetime "valid_to", precision: nil
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+    t.index ["cluster_id"], name: "index_core_analytics_node_states_on_cluster_id"
+    t.index ["node_id", "valid_from"], name: "core_analytics_index_node_states_on_node_id_and_valid_from"
+    t.index ["node_id", "valid_to"], name: "core_analytics_index_node_states_on_node_id_and_valid_to"
+    t.index ["node_id"], name: "core_analytics_index_node_states_current_on_node_id", where: "(valid_to IS NULL)"
+    t.index ["node_id"], name: "index_core_analytics_node_states_on_node_id"
+    t.index ["partition_id"], name: "index_core_analytics_node_states_on_partition_id"
+    t.index ["snapshot_id", "node_id"], name: "core_analytics_uniq_node_state_per_snapshot", unique: true
+    t.index ["snapshot_id"], name: "index_core_analytics_node_states_on_snapshot_id"
+  end
+
+  create_table "core_analytics_nodes", force: :cascade do |t|
+    t.bigint "cluster_id", null: false
+    t.string "hostname", null: false
+    t.string "prefix", null: false
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+    t.index ["cluster_id", "hostname"], name: "index_core_analytics_nodes_on_cluster_id_and_hostname", unique: true
+    t.index ["cluster_id"], name: "index_core_analytics_nodes_on_cluster_id"
+  end
+
+  create_table "core_analytics_snapshots", force: :cascade do |t|
+    t.bigint "cluster_id", null: false
+    t.datetime "captured_at", precision: nil, null: false
+    t.string "source_cmd", null: false
+    t.string "parser_version", null: false
+    t.text "raw_text", null: false
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+    t.index ["cluster_id", "captured_at"], name: "index_core_analytics_snapshots_on_cluster_id_and_captured_at"
+    t.index ["cluster_id"], name: "index_core_analytics_snapshots_on_cluster_id"
+  end
+
   create_table "core_bot_links", force: :cascade do |t|
     t.bigint "user_id"
     t.string "token"
@@ -385,6 +428,47 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
     t.string "name_en"
     t.index ["private_key"], name: "index_core_clusters_on_private_key", unique: true
     t.index ["public_key"], name: "index_core_clusters_on_public_key", unique: true
+  end
+
+  create_table "core_comment_tags", id: false, force: :cascade do |t|
+    t.bigint "comment_id", null: false
+    t.bigint "tag_id", null: false
+    t.datetime "created_at", precision: nil, default: -> { "CURRENT_TIMESTAMP" }, null: false
+    t.index ["comment_id", "tag_id"], name: "index_core_comment_tags_unique_comment_tag", unique: true
+    t.index ["tag_id"], name: "index_core_comment_tags_on_tag_id"
+  end
+
+  create_table "core_comments", force: :cascade do |t|
+    t.integer "author_id", null: false
+    t.integer "cluster_id", null: false
+    t.string "title", null: false
+    t.text "body"
+    t.datetime "valid_from", precision: nil, null: false
+    t.datetime "valid_to", precision: nil
+    t.integer "severity", default: 0, null: false
+    t.integer "reason_group_id"
+    t.integer "reason_id"
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+    t.index ["author_id"], name: "index_core_comments_on_author_id"
+    t.index ["cluster_id", "severity"], name: "index_core_comments_on_cluster_id_and_severity"
+    t.index ["cluster_id", "valid_from"], name: "index_core_comments_on_cluster_id_and_valid_from"
+    t.index ["cluster_id", "valid_to"], name: "index_core_comments_on_cluster_id_and_valid_to"
+    t.index ["cluster_id"], name: "index_core_comments_current_open_ended_on_cluster_id", where: "(valid_to IS NULL)"
+    t.index ["cluster_id"], name: "index_core_comments_on_cluster_id"
+    t.index ["reason_group_id", "reason_id"], name: "index_core_comments_on_reason_group_id_and_reason_id"
+    t.index ["reason_group_id"], name: "index_core_comments_on_reason_group_id"
+    t.index ["reason_id"], name: "index_core_comments_on_reason_id"
+  end
+
+  create_table "core_comments_nodes", force: :cascade do |t|
+    t.bigint "comment_id", null: false
+    t.bigint "node_id", null: false
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+    t.index ["comment_id", "node_id"], name: "index_core_comments_nodes_unique_comment_node", unique: true
+    t.index ["comment_id"], name: "index_core_comments_nodes_on_comment_id"
+    t.index ["node_id"], name: "index_core_comments_nodes_on_node_id"
   end
 
   create_table "core_countries", id: :serial, force: :cascade do |t|
@@ -497,6 +581,7 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
     t.datetime "updated_at"
     t.integer "organization_id"
     t.integer "organization_department_id"
+    t.boolean "notify_about_resources", default: false
     t.index ["organization_id"], name: "index_core_members_on_organization_id"
     t.index ["owner", "user_id", "project_id"], name: "index_core_members_on_owner_and_user_id_and_project_id"
     t.index ["project_access_state"], name: "index_core_members_on_project_access_state"
@@ -567,6 +652,8 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
     t.string "name"
     t.integer "cluster_id"
     t.string "resources"
+    t.integer "max_running_jobs"
+    t.integer "max_submitted_jobs"
     t.index ["cluster_id"], name: "index_core_partitions_on_cluster_id"
   end
 
@@ -629,11 +716,27 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
     t.index ["state"], name: "index_core_projects_on_state"
   end
 
+  create_table "core_queue_accesses", force: :cascade do |t|
+    t.bigint "access_id"
+    t.bigint "partition_id"
+    t.bigint "resource_control_id"
+    t.boolean "synced_with_cluster", default: false
+    t.string "status", null: false
+    t.integer "max_running_jobs"
+    t.integer "max_submitted_jobs"
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+    t.index ["access_id"], name: "index_core_queue_accesses_on_access_id"
+    t.index ["partition_id"], name: "index_core_queue_accesses_on_partition_id"
+    t.index ["resource_control_id"], name: "index_core_queue_accesses_on_resource_control_id"
+  end
+
   create_table "core_quota_kinds", id: :serial, force: :cascade do |t|
     t.string "name_ru", limit: 255
     t.string "measurement_ru", limit: 255
     t.string "name_en"
     t.string "measurement_en"
+    t.string "api_key"
   end
 
   create_table "core_removed_members", force: :cascade do |t|
@@ -690,6 +793,35 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
     t.index ["research_area_id"], name: "ira_on_ira_per_projects"
   end
 
+  create_table "core_resource_control_fields", force: :cascade do |t|
+    t.bigint "resource_control_id"
+    t.bigint "quota_kind_id"
+    t.float "cur_value"
+    t.float "limit"
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+    t.index ["quota_kind_id"], name: "index_core_resource_control_fields_on_quota_kind_id"
+    t.index ["resource_control_id"], name: "index_core_resource_control_fields_on_resource_control_id"
+  end
+
+  create_table "core_resource_controls", force: :cascade do |t|
+    t.datetime "last_sync_at", precision: nil
+    t.date "started_at"
+    t.bigint "access_id"
+    t.string "status", null: false
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+    t.index ["access_id"], name: "index_core_resource_controls_on_access_id"
+  end
+
+  create_table "core_resource_users", force: :cascade do |t|
+    t.string "email"
+    t.bigint "access_id"
+    t.bigint "user_id"
+    t.index ["access_id"], name: "index_core_resource_users_on_access_id"
+    t.index ["user_id"], name: "index_core_resource_users_on_user_id"
+  end
+
   create_table "core_sureties", id: :serial, force: :cascade do |t|
     t.integer "project_id"
     t.string "state", limit: 255
@@ -721,6 +853,30 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
     t.integer "surety_id"
     t.string "image", limit: 255
     t.index ["surety_id"], name: "index_core_surety_scans_on_surety_id"
+  end
+
+  create_table "core_tag_groups", force: :cascade do |t|
+    t.string "key", null: false
+    t.string "name", null: false
+    t.integer "sort_order", default: 0, null: false
+    t.boolean "is_active", default: true, null: false
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+    t.index ["is_active", "sort_order"], name: "index_core_tag_groups_on_active_and_sort"
+    t.index ["key"], name: "index_core_tag_groups_on_key", unique: true
+  end
+
+  create_table "core_tags", force: :cascade do |t|
+    t.bigint "group_id", null: false
+    t.string "key", null: false
+    t.string "label", null: false
+    t.integer "sort_order", default: 0, null: false
+    t.boolean "is_active", default: true, null: false
+    t.datetime "created_at", precision: nil, null: false
+    t.datetime "updated_at", precision: nil, null: false
+    t.index ["group_id", "is_active", "sort_order"], name: "index_core_tags_on_group_active_sort"
+    t.index ["group_id", "key"], name: "index_core_tags_unique_group_key", unique: true
+    t.index ["group_id"], name: "index_core_tags_on_group_id"
   end
 
   create_table "delayed_jobs", id: :serial, force: :cascade do |t|
@@ -1430,6 +1586,19 @@ ActiveRecord::Schema.define(version: 2025_03_31_194719) do
     t.index ["url"], name: "index_wikiplus_pages_on_url", unique: true
   end
 
+  add_foreign_key "core_analytics_node_states", "core_analytics_nodes", column: "node_id"
+  add_foreign_key "core_analytics_node_states", "core_analytics_snapshots", column: "snapshot_id"
+  add_foreign_key "core_analytics_node_states", "core_clusters", column: "cluster_id"
+  add_foreign_key "core_analytics_node_states", "core_partitions", column: "partition_id"
+  add_foreign_key "core_analytics_nodes", "core_clusters", column: "cluster_id"
+  add_foreign_key "core_analytics_snapshots", "core_clusters", column: "cluster_id"
   add_foreign_key "core_bot_links", "users"
+  add_foreign_key "core_comment_tags", "core_comments", column: "comment_id"
+  add_foreign_key "core_comment_tags", "core_tags", column: "tag_id"
+  add_foreign_key "core_comments", "core_clusters", column: "cluster_id"
+  add_foreign_key "core_comments", "users", column: "author_id"
+  add_foreign_key "core_comments_nodes", "core_analytics_nodes", column: "node_id"
+  add_foreign_key "core_comments_nodes", "core_comments", column: "comment_id"
+  add_foreign_key "core_tags", "core_tag_groups", column: "group_id"
   add_foreign_key "support_field_values", "support_topics_fields", column: "topics_field_id"
 end
