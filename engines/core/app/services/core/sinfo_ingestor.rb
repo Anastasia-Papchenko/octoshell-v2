@@ -2,24 +2,23 @@ require "set"
 
 module Core
   class SinfoIngestor
-    TABLE_SNAPSHOTS   = 'core_analytics_snapshots'.freeze
-    TABLE_NODES       = 'core_analytics_nodes'.freeze
-    TABLE_NODE_STATES = 'core_analytics_node_states'.freeze
-
-    TABLE_PARTITIONS  = 'core_partitions'.freeze
-
-
     STATES = %w[alloc idle comp drain drng down maint reserved mix].freeze
 
-    def initialize(raw_text:, source_cmd: 'sinfo -a', parser_version: 'v1',
-                  quiet: false, cluster_id:, **_)
+    # Если в твоей версии Rails unique_by по массиву колонок не работает,
+    # замени на реальные имена индексов, например:
+    # :index_core_analytics_nodes_on_cluster_id_and_hostname
+    # :index_core_analytics_node_states_on_snapshot_id_and_node_id
+    NODE_UNIQUE_BY = %i[cluster_id hostname].freeze
+    NODE_STATE_UNIQUE_BY = %i[snapshot_id node_id].freeze
+
+    def initialize(raw_text:, source_cmd: "sinfo -a", parser_version: "v1",
+                   quiet: false, cluster_id:, **_)
       @raw            = raw_text.to_s
       @source_cmd     = source_cmd
       @parser_version = parser_version
       @quiet          = quiet
       @cluster_id     = cluster_id
     end
-
 
     def call
       raise "empty sinfo output" if @raw.strip.empty?
@@ -33,14 +32,15 @@ module Core
           partition_names = parsed_lines.map { |h| h[:partition] }.to_set
           hostnames       = parsed_lines.flat_map { |h| h[:hostnames] }.to_set
 
-          part_id = upsert_partitions(partition_names, parsed_lines) # вернёт map name->core_partitions.id
-          node_id = upsert_nodes(hostnames)                          # map hostname->core_analytics_nodes.id
+          part_id = upsert_partitions(partition_names, parsed_lines)
+          node_id = upsert_nodes(hostnames)
 
           rows = []
           parsed_lines.each do |h|
             p_id = part_id[h[:partition]]
             st   = h[:state]
             rsn  = h[:has_reason]
+
             h[:hostnames].each do |hn|
               n_id = node_id[hn]
               rows << [snapshot_id, n_id, p_id, st, rsn]
@@ -49,7 +49,6 @@ module Core
 
           rows = rows.reverse.uniq { |snap_id, node_id, _p, _s, _r| [snap_id, node_id] }.reverse
           rows_written = bulk_upsert_node_states(rows)
-
 
           {
             snapshot_id:  snapshot_id,
@@ -63,6 +62,22 @@ module Core
 
     private
 
+    def snapshot_model
+      Core::Analytics::Snapshot
+    end
+
+    def node_model
+      Core::Analytics::Node
+    end
+
+    def node_state_model
+      Core::Analytics::NodeState
+    end
+
+    def partition_model
+      Core::Partition
+    end
+
     def with_silenced_ar
       return yield unless @quiet
 
@@ -70,6 +85,7 @@ module Core
       app_logger = defined?(Rails) ? Rails.logger : nil
       old_ar  = ar_logger&.level
       old_app = app_logger&.level
+
       begin
         ar_logger.level  = Logger::WARN if ar_logger
         app_logger.level = Logger::INFO if app_logger
@@ -85,25 +101,24 @@ module Core
     end
 
     def insert_snapshot!
-      sql = <<~SQL
-        INSERT INTO #{TABLE_SNAPSHOTS}
-          (cluster_id, captured_at, source_cmd, raw_text, parser_version, created_at, updated_at)
-        VALUES ($1, NOW(), $2, $3, $4, NOW(), NOW())
-        RETURNING id
-      SQL
+      now = Time.current
 
-      res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', [
-        bind_int(@cluster_id),
-        bind_str(@source_cmd),
-        bind_str(@raw),
-        bind_str(@parser_version)
-      ])
-      res.rows.first.first
-    end
+      result = snapshot_model.unscoped.insert_all!(
+        [
+          {
+            cluster_id:     @cluster_id,
+            captured_at:    now,
+            source_cmd:     @source_cmd,
+            raw_text:       @raw,
+            parser_version: @parser_version,
+            created_at:     now,
+            updated_at:     now
+          }
+        ],
+        returning: %w[id]
+      )
 
-
-    def column_exists_in_db?(table, column)
-      ActiveRecord::Base.connection.columns(table).any? { |c| c.name == column.to_s }
+      result.rows.first.first
     end
 
     def upsert_partitions(partition_names, _parsed_lines)
@@ -113,82 +128,74 @@ module Core
       return map if names.empty?
 
       names.each_slice(500) do |chunk|
-        placeholders = chunk.each_index.map { |i| "$#{i + 2}" }.join(", ")
-        binds = [bind_int(@cluster_id)] + chunk.map { |name| bind_str(name) }
-
-        sql = <<~SQL
-          SELECT id, name
-          FROM #{TABLE_PARTITIONS}
-          WHERE cluster_id = $1
-            AND name IN (#{placeholders})
-        SQL
-
-        res = ActiveRecord::Base.connection.exec_query(sql, "SQL", binds)
-        res.rows.each { |(id, name)| map[name] = id }
+        partition_model.unscoped
+                       .where(cluster_id: @cluster_id, name: chunk)
+                       .pluck(:name, :id)
+                       .each do |name, id|
+          map[name] = id
+        end
       end
 
       missing = names - map.keys
+      return map if missing.empty?
 
       missing.each_slice(200) do |chunk|
-        values = []
-        binds  = []
+        partition_model.unscoped.insert_all!(
+          chunk.map do |name|
+            {
+              cluster_id: @cluster_id,
+              name:       name
+            }
+          end
+        )
 
-        chunk.each_with_index do |name, i|
-          base = i * 2
-          values << "($#{base + 1}, $#{base + 2})"
-          binds << bind_int(@cluster_id) << bind_str(name)
+        partition_model.unscoped
+                       .where(cluster_id: @cluster_id, name: chunk)
+                       .pluck(:name, :id)
+                       .each do |name, id|
+          map[name] = id
         end
-
-        sql = <<~SQL
-          INSERT INTO #{TABLE_PARTITIONS} (cluster_id, name)
-          VALUES #{values.join(", ")}
-          RETURNING id, name
-        SQL
-
-        res = ActiveRecord::Base.connection.exec_query(sql, "SQL", binds)
-        res.rows.each { |(id, name)| map[name] = id }
       end
 
       map
     end
-
 
     def upsert_nodes(hostnames)
       map = {}
+      return map if hostnames.empty?
 
       hostnames.each_slice(500) do |chunk|
-        values = []
-        binds  = []
+        now = Time.current
 
-        chunk.each_with_index do |hn, i|
+        payload = chunk.map do |hn|
           prefix, _number = split_prefix_number(hn)
-          base = i * 3
-          values << "($#{base+1}, $#{base+2}, $#{base+3}, NOW(), NOW())"
-          binds  << bind_int(@cluster_id) << bind_str(hn) << bind_str(prefix)
+
+          {
+            cluster_id: @cluster_id,
+            hostname:   hn,
+            prefix:     prefix,
+            created_at: now,
+            updated_at: now
+          }
         end
 
-        sql = <<~SQL
-          INSERT INTO #{TABLE_NODES} (cluster_id, hostname, prefix, created_at, updated_at)
-          VALUES #{values.join(',')}
-          ON CONFLICT (cluster_id, hostname) DO UPDATE
-            SET prefix = EXCLUDED.prefix,
-                updated_at = EXCLUDED.updated_at
-          RETURNING id, hostname
-        SQL
+        node_model.unscoped.upsert_all(payload, unique_by: NODE_UNIQUE_BY)
 
-        res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', binds)
-        res.rows.each { |(id, hostname)| map[hostname] = id }
+        node_model.unscoped
+                  .where(cluster_id: @cluster_id, hostname: chunk)
+                  .pluck(:hostname, :id)
+                  .each do |hostname, id|
+          map[hostname] = id
+        end
       end
 
       map
     end
-
 
     def bulk_upsert_node_states(rows)
       return 0 if rows.empty?
 
       node_ids = rows.map { |(_snap_id, node_id, _p, _s, _r)| node_id }.uniq
-
       current_states = load_current_states(node_ids)
 
       rows_to_insert = []
@@ -212,7 +219,6 @@ module Core
       end
 
       close_node_states(ids_to_close) unless ids_to_close.empty?
-
       insert_new_node_states(rows_to_insert)
     end
 
@@ -222,20 +228,10 @@ module Core
       map = {}
 
       node_ids.each_slice(5_000) do |chunk|
-        placeholders = (1..chunk.size).map { |i| "$#{i+1}" }.join(', ')
-        sql = <<~SQL
-          SELECT id, node_id, partition_id, state, has_reason
-          FROM #{TABLE_NODE_STATES}
-          WHERE cluster_id = $1
-            AND valid_to IS NULL
-            AND node_id IN (#{placeholders})
-        SQL
-
-        binds = [bind_int(@cluster_id)]
-        chunk.each { |nid| binds << bind_int(nid) }
-
-        res = ActiveRecord::Base.connection.exec_query(sql, 'SQL', binds)
-        res.rows.each do |id, node_id, part_id, state, has_reason|
+        node_state_model.unscoped
+                        .where(cluster_id: @cluster_id, valid_to: nil, node_id: chunk)
+                        .pluck(:id, :node_id, :partition_id, :state, :has_reason)
+                        .each do |id, node_id, part_id, state, has_reason|
           map[node_id] = {
             id:           id,
             partition_id: part_id,
@@ -250,15 +246,11 @@ module Core
 
     def close_node_states(ids)
       ids.each_slice(5_000) do |chunk|
-        placeholders = (1..chunk.size).map { |i| "$#{i}" }.join(', ')
-        sql = <<~SQL
-          UPDATE #{TABLE_NODE_STATES}
-          SET valid_to   = NOW(),
-              updated_at = NOW()
-          WHERE id IN (#{placeholders})
-        SQL
-        binds = chunk.map { |id| bind_int(id) }
-        ActiveRecord::Base.connection.exec_query(sql, 'SQL', binds)
+        now = Time.current
+
+        node_state_model.unscoped
+                        .where(id: chunk)
+                        .update_all(valid_to: now, updated_at: now)
       end
     end
 
@@ -266,46 +258,40 @@ module Core
       return 0 if rows.empty?
 
       count = 0
+
       rows.each_slice(5_000) do |chunk|
-        values = []
-        binds  = []
+        now = Time.current
 
-        chunk.each_with_index do |(snap_id, node_id, part_id, state, has_reason), i|
-          base = i * 6
-          values << "($#{base+1}, $#{base+2}, $#{base+3}, $#{base+4}, $#{base+5}, NULL, $#{base+6}, NOW(), NULL, NOW(), NOW())"
-
-          binds << bind_int(@cluster_id) \
-                << bind_int(snap_id) \
-                << bind_int(node_id) \
-                << bind_int(part_id) \
-                << bind_str(state) \
-                << bind_bool(has_reason)
+        payload = chunk.map do |snap_id, node_id, part_id, state, has_reason|
+          {
+            cluster_id:   @cluster_id,
+            snapshot_id:  snap_id,
+            node_id:      node_id,
+            partition_id: part_id,
+            state:        state,
+            substate:     nil,
+            has_reason:   has_reason,
+            valid_from:   now,
+            valid_to:     nil,
+            created_at:   now,
+            updated_at:   now
+          }
         end
 
+        node_state_model.unscoped.upsert_all(
+          payload,
+          unique_by: NODE_STATE_UNIQUE_BY
+        )
 
-        sql = <<~SQL
-          INSERT INTO #{TABLE_NODE_STATES}
-            (cluster_id, snapshot_id, node_id, partition_id,
-             state, substate, has_reason, valid_from, valid_to, created_at, updated_at)
-          VALUES #{values.join(',')}
-          ON CONFLICT (snapshot_id, node_id) DO UPDATE
-            SET partition_id = EXCLUDED.partition_id,
-                state        = EXCLUDED.state,
-                has_reason   = EXCLUDED.has_reason,
-                updated_at   = EXCLUDED.updated_at
-        SQL
-
-        ActiveRecord::Base.connection.exec_query(sql, 'SQL', binds)
         count += chunk.size
       end
 
       count
     end
 
-
     def parse_table_lines(raw)
       lines = raw.split("\n").map!(&:rstrip)
-      start_idx = lines.index { |l| l.strip.start_with?('PARTITION') } || 0
+      start_idx = lines.index { |l| l.strip.start_with?("PARTITION") } || 0
       rows = lines[(start_idx + 1)..] || []
       rows.filter_map { |line| parse_line(line) }
     end
@@ -315,9 +301,10 @@ module Core
       return nil unless m
 
       raw_partition, avail, timelimit, _nodes_count, state_token, nodelist_raw = m.captures
-      partition = raw_partition.sub(/\*$/, '')
+      partition = raw_partition.sub(/\*$/, "")
       state, has_reason = parse_state(state_token)
       hostnames = expand_nodelist(nodelist_raw)
+
       {
         partition:  partition,
         avail:      avail,
@@ -329,7 +316,7 @@ module Core
     end
 
     def parse_state(token)
-      has_reason = token.end_with?('*')
+      has_reason = token.end_with?("*")
       base = has_reason ? token[0..-2] : token
       state = STATES.include?(base) ? base : base
       [state, has_reason]
@@ -337,70 +324,67 @@ module Core
 
     def expand_nodelist(nodelist_raw)
       str = nodelist_raw.strip
-      return str.split(',').map(&:strip).reject(&:empty?) unless str.include?('[')
+      return str.split(",").map(&:strip).reject(&:empty?) unless str.include?("[")
 
       result = []
       i = 0
+
       while i < str.length
-        if str[i] == ','
+        if str[i] == ","
           i += 1
           next
         end
-        bracket_pos = str.index('[', i)
+
+        bracket_pos = str.index("[", i)
+
         if bracket_pos.nil?
-          rest = str[i..-1]
-          rest.split(',').each do |s|
+          rest = str[i..]
+          rest.split(",").each do |s|
             s = s.strip
             result << s unless s.empty?
           end
           break
         end
+
         prefix = str[i...bracket_pos]
-        close_pos = str.index(']', bracket_pos + 1)
+        close_pos = str.index("]", bracket_pos + 1)
         raise "bad NODELIST: missing ]" unless close_pos
+
         inner = str[(bracket_pos + 1)...close_pos]
         result.concat(expand_bracket_group(prefix, inner))
         i = close_pos + 1
       end
+
       result
     end
 
     def expand_bracket_group(prefix, inner)
       out = []
-      inner.split(',').map(&:strip).reject(&:empty?).each do |part|
-        if part.include?('-')
-          a, b = part.split('-', 2).map!(&:strip)
+
+      inner.split(",").map(&:strip).reject(&:empty?).each do |part|
+        if part.include?("-")
+          a, b = part.split("-", 2).map!(&:strip)
           width = (a =~ /^\d+$/) ? a.length : nil
+
           (a.to_i..b.to_i).each do |x|
-            num = width ? x.to_s.rjust(width, '0') : x.to_s
+            num = width ? x.to_s.rjust(width, "0") : x.to_s
             out << "#{prefix}#{num}"
           end
         else
           out << "#{prefix}#{part}"
         end
       end
+
       out
     end
 
     def split_prefix_number(hostname)
       m = hostname.match(/^([^\d]*)(\d+)?$/)
       return [hostname, nil] unless m
-      prefix = m[1] || ''
+
+      prefix = m[1] || ""
       number = m[2] ? m[2].to_i : nil
       [prefix, number]
-    end
-
-
-    def bind_str(val)
-      ActiveRecord::Relation::QueryAttribute.new(nil, val, ActiveRecord::Type::String.new)
-    end
-
-    def bind_int(val)
-      ActiveRecord::Relation::QueryAttribute.new(nil, val, ActiveRecord::Type::Integer.new)
-    end
-
-    def bind_bool(val)
-      ActiveRecord::Relation::QueryAttribute.new(nil, val, ActiveRecord::Type::Boolean.new)
     end
   end
 end
