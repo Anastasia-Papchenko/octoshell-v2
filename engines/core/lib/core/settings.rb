@@ -90,7 +90,7 @@ module Core
 
             add_item_if_may('cluster_logs', t("admin_submenu.cluster_logs"), core.admin_cluster_logs_path, 'core/admin/cluster_logs')
 
-            add_item_if_may('core_analytics', t("admin_submenu.analytics"), core.admin_analytics_path, 'core/admin/analytics')
+            add_item_if_may('core_analytics', t("core.admin.analytics.admin_submenu.analytics"), core.admin_analytics_path, 'core/admin/analytics')
 
             add_item_if_may('quota_kinds', t("admin_submenu.quota_kinds"), core.admin_quota_kinds_path, 'core/admin/quota_kinds')
 

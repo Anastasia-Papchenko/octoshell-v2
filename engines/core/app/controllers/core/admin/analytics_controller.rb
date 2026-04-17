@@ -162,7 +162,6 @@ module Core
       end
 
       enter_by_time = Hash.new { |h, k| h[k] = Hash.new(0) }
-
       snaps.each do |snap|
         enter_by_snap[snap.id].each do |state, count|
           enter_by_time[snap.captured_at][state.to_s] += count.to_i
@@ -193,7 +192,7 @@ module Core
       base_counts.each { |st, cnt| cur[st] = cnt.to_i }
 
       if metric != 'states'
-        unavailable_states = %w[down drain drng maint reserved].freeze
+        unavailable_states = %w[down drain drng maint reserved]
 
         points = snaps.each_with_index.map do |s, idx|
           if idx > 0
@@ -233,8 +232,11 @@ module Core
           pie: pie
         }
       end
+      
 
       series = Hash.new { |h, k| h[k] = [] }
+
+      unavailable_states = %w[down drain drng maint]
 
       snaps.each_with_index do |s, idx|
         if idx > 0
@@ -263,6 +265,10 @@ module Core
 
       states.select! do |st|
         series[st].any? { |p| p[:y].to_i > 0 }
+      end
+
+      if series['available'].any? { |p| p[:y].to_i > 0 }
+        states << 'available'
       end
 
       series.slice!(*states)
