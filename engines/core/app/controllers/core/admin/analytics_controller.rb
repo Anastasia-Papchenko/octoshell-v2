@@ -17,7 +17,7 @@ module Core
       @clusters = Core::Cluster.order(:name_ru).includes(:nodes)
 
       node_states_rel = Core::Analytics::NodeState.current
-      @global_state_counts = node_states_rel.group(:state).count
+      @global_state_counts = grouped_distinct_node_counts(node_states_rel, :state)
 
       @cluster_stats = {}
       @clusters.each do |cluster|
@@ -28,26 +28,29 @@ module Core
         }
       end
 
-      states_counts = node_states_rel.group(:cluster_id, :state).count
+      states_counts = grouped_distinct_node_counts(node_states_rel, :cluster_id, :state)
       states_counts.each do |(cluster_id, state), count|
         next unless @cluster_stats.key?(cluster_id)
         @cluster_stats[cluster_id][:states][state] = count
       end
 
-      issues_counts = node_states_rel.where(has_reason: true).group(:cluster_id).count
+      issues_counts = grouped_distinct_node_counts(
+        node_states_rel.where(has_reason: true),
+        :cluster_id
+      )
       issues_counts.each do |cluster_id, count|
         next unless @cluster_stats.key?(cluster_id)
         @cluster_stats[cluster_id][:issues] = count
       end
 
       @partition_stats = {}
-      partition_counts = node_states_rel.joins(:partition)
-                                        .group(
-                                          'core_partitions.cluster_id',
-                                          'core_partitions.id',
-                                          'core_partitions.name',
-                                          'core_analytics_node_states.state'
-                                        ).count
+      partition_counts = grouped_distinct_node_counts(
+        node_states_rel.joins(:partition),
+        'core_partitions.cluster_id',
+        'core_partitions.id',
+        'core_partitions.name',
+        'core_analytics_node_states.state'
+      )
 
       partition_counts.each do |(cluster_id, partition_id, partition_name, state), count|
         @partition_stats[cluster_id] ||= {}
@@ -63,9 +66,11 @@ module Core
 
       if @latest_snapshots.any?
         snapshot_ids = @latest_snapshots.map(&:id)
-        snapshot_counts = Core::Analytics::NodeState.where(snapshot_id: snapshot_ids)
-                                                   .group(:snapshot_id, :state)
-                                                   .count
+        snapshot_counts = grouped_distinct_node_counts(
+          Core::Analytics::NodeState.where(snapshot_id: snapshot_ids),
+          :snapshot_id,
+          :state
+        )
         snapshot_counts.each do |(snap_id, state), count|
           @snapshot_stats[snap_id] ||= {}
           @snapshot_stats[snap_id][state] = count
@@ -92,7 +97,7 @@ module Core
       to     = parse_time(params[:to])   || Time.current
       metric = params[:metric].presence || 'idle'
 
-      total_nodes = Core::Analytics::Node.where(cluster_id: cluster.id).count
+      total_nodes = Core::Analytics::Node.where(cluster_id: cluster.id).distinct.count(:id)
 
       snaps = cluster.snapshots
                     .where(captured_at: from..to)
@@ -113,6 +118,8 @@ module Core
                           }
                         end
 
+      pie = build_state_pie_data(from: from, to: to, cluster_id: cluster.id)
+
       if snaps.blank?
         return render json: {
           cluster_id: cluster.id,
@@ -123,26 +130,87 @@ module Core
           states: [],
           series: {},
           points: [],
-          comments: comments
+          comments: comments,
+          pie: pie
         }
       end
 
       snap_ids   = snaps.map(&:id)
       snap_times = snaps.map(&:captured_at)
 
-      if metric != 'states'
-        counts =
-          Core::Analytics::NodeState
-            .where(snapshot_id: snap_ids)
-            .group(:snapshot_id, :state)
-            .count
+      first_ts = snaps.first.captured_at
 
+      base_scope = Core::Analytics::NodeState.at(first_ts).where(cluster_id: cluster.id)
+
+      base_counts =
+        grouped_distinct_node_counts(base_scope, :state)
+          .transform_keys(&:to_s)
+
+      base_total = base_scope.distinct.count(:node_id)
+      total_nodes = base_total if total_nodes.zero? && base_total.positive?
+
+      enter_raw =
+        grouped_distinct_node_counts(
+          Core::Analytics::NodeState.where(cluster_id: cluster.id, snapshot_id: snap_ids),
+          :snapshot_id,
+          :state
+        )
+
+      enter_by_snap = Hash.new { |h, k| h[k] = Hash.new(0) }
+      enter_raw.each do |(sid, st), cnt|
+        enter_by_snap[sid][st.to_s] = cnt.to_i
+      end
+
+      enter_by_time = Hash.new { |h, k| h[k] = Hash.new(0) }
+
+      snaps.each do |snap|
+        enter_by_snap[snap.id].each do |state, count|
+          enter_by_time[snap.captured_at][state.to_s] += count.to_i
+        end
+      end
+
+      leave_raw =
+        grouped_distinct_node_counts(
+          Core::Analytics::NodeState.where(cluster_id: cluster.id, valid_to: snap_times),
+          :valid_to,
+          :state
+        )
+
+      leave_by_time = Hash.new { |h, k| h[k] = Hash.new(0) }
+      leave_raw.each do |(t, st), cnt|
+        leave_by_time[t][st.to_s] = cnt.to_i
+      end
+
+      states =
+        (
+          Core::Analytics::NodeState::STATES.map(&:to_s) +
+          base_counts.keys +
+          enter_raw.keys.map { |(_, st)| st.to_s } +
+          leave_raw.keys.map { |(_, st)| st.to_s }
+        ).uniq
+
+      cur = Hash.new(0)
+      base_counts.each { |st, cnt| cur[st] = cnt.to_i }
+
+      if metric != 'states'
         unavailable_states = %w[down drain drng maint reserved].freeze
 
-        points = snaps.map do |s|
-          idle  = counts[[s.id, 'idle']].to_i
-          alloc = counts[[s.id, 'alloc']].to_i
-          unavailable = unavailable_states.sum { |st| counts[[s.id, st]].to_i }
+        points = snaps.each_with_index.map do |s, idx|
+          if idx > 0
+            t = s.captured_at
+
+            leave_by_time[t].each do |st, cnt|
+              cur[st] -= cnt
+            end
+
+            enter_by_snap[s.id].each do |st, cnt|
+              cur[st] += cnt
+            end
+          end
+
+          idle  = cur['idle'].to_i
+          alloc = cur['alloc'].to_i
+          unavailable = unavailable_states.sum { |st| cur[st].to_i }
 
           y =
             case metric
@@ -161,50 +229,10 @@ module Core
           from: from.iso8601,
           to: to.iso8601,
           points: points,
-          comments: comments
+          comments: comments,
+          pie: pie
         }
       end
-
-
-      first_ts = snaps.first.captured_at
-
-      base_counts =
-        Core::Analytics::NodeState
-          .at(first_ts)
-          .where(cluster_id: cluster.id)
-          .group(:state)
-          .count
-          .transform_keys(&:to_s)
-
-      base_total = base_counts.values.sum
-      total_nodes = base_total if base_total > 0
-
-      enter_raw =
-        Core::Analytics::NodeState
-          .where(cluster_id: cluster.id, snapshot_id: snap_ids)
-          .group(:snapshot_id, :state)
-          .count
-
-      enter_by_snap = Hash.new { |h, k| h[k] = Hash.new(0) }
-      enter_raw.each do |(sid, st), cnt|
-        enter_by_snap[sid][st.to_s] = cnt.to_i
-      end
-
-      leave_raw =
-        Core::Analytics::NodeState
-          .where(cluster_id: cluster.id, valid_to: snap_times)
-          .group(:valid_to, :state)
-          .count
-
-      leave_by_time = Hash.new { |h, k| h[k] = Hash.new(0) }
-      leave_raw.each do |(t, st), cnt|
-        leave_by_time[t][st.to_s] = cnt.to_i
-      end
-
-      states = (Core::Analytics::NodeState::STATES.map(&:to_s) + base_counts.keys).uniq
-
-      cur = Hash.new(0)
-      base_counts.each { |st, cnt| cur[st] = cnt.to_i }
 
       series = Hash.new { |h, k| h[k] = [] }
 
@@ -222,14 +250,21 @@ module Core
         end
 
         x = s.captured_at.iso8601
+
         states.each do |st|
           series[st] << { x: x, y: cur[st].to_i }
         end
+
+        available_y = cur['alloc'].to_i + cur['idle'].to_i
+        series['available'] << { x: x, y: available_y }
       end
+
+      states << 'available'
 
       states.select! do |st|
         series[st].any? { |p| p[:y].to_i > 0 }
       end
+
       series.slice!(*states)
 
       render json: {
@@ -240,7 +275,8 @@ module Core
         to: to.iso8601,
         states: states,
         series: series,
-        comments: comments
+        comments: comments,
+        pie: pie
       }
     end
 
@@ -356,6 +392,121 @@ module Core
       Time.zone.parse(str.to_s)
     rescue StandardError
       nil
+    end
+
+    def grouped_distinct_node_counts(relation, *group_columns)
+      rel = relation.where.not(node_id: nil)
+
+      return rel.distinct.count(:node_id) if group_columns.blank?
+
+      rel.group(*group_columns).distinct.count(:node_id)
+    end
+
+    def build_state_pie_data(from:, to:, cluster_id:)
+      return { items: [], total_seconds: 0.0, total_node_hours: 0.0 } if to <= from
+
+      base_counts =
+        grouped_distinct_node_counts(
+          Core::Analytics::NodeState.at(from).where(cluster_id: cluster_id),
+          :state
+        ).transform_keys(&:to_s)
+
+      enter_raw =
+        grouped_distinct_node_counts(
+          Core::Analytics::NodeState
+            .where(cluster_id: cluster_id)
+            .where(snapshot_id: Core::Analytics::Snapshot.where(cluster_id: cluster_id, captured_at: from..to).select(:id)),
+          :snapshot_id,
+          :state
+        )
+
+      snaps_by_id =
+        Core::Analytics::Snapshot
+          .where(cluster_id: cluster_id, captured_at: from..to)
+          .pluck(:id, :captured_at)
+          .to_h
+
+      enter_by_time = Hash.new { |h, k| h[k] = Hash.new(0) }
+      enter_raw.each do |(snapshot_id, state), count|
+        captured_at = snaps_by_id[snapshot_id]
+        next unless captured_at
+        enter_by_time[captured_at][state.to_s] += count.to_i
+      end
+
+      leave_raw =
+        grouped_distinct_node_counts(
+          Core::Analytics::NodeState
+            .where(cluster_id: cluster_id, valid_to: from..to),
+          :valid_to,
+          :state
+        )
+
+      leave_by_time = Hash.new { |h, k| h[k] = Hash.new(0) }
+      leave_raw.each do |(time_point, state), count|
+        leave_by_time[time_point][state.to_s] += count.to_i
+      end
+
+      states =
+        (
+          Core::Analytics::NodeState::STATES.map(&:to_s) +
+          base_counts.keys +
+          enter_raw.keys.map { |(_, st)| st.to_s } +
+          leave_raw.keys.map { |(_, st)| st.to_s }
+        ).uniq
+
+      cur = Hash.new(0)
+      base_counts.each { |state, count| cur[state] = count.to_i }
+
+      state_seconds = Hash.new(0.0)
+
+      change_times = (enter_by_time.keys + leave_by_time.keys + [to])
+                      .select { |t| t.present? && t > from && t <= to }
+                      .uniq
+                      .sort
+
+      prev_time = from
+
+      change_times.each do |time_point|
+        duration = time_point - prev_time
+
+        if duration.positive?
+          states.each do |state|
+            count = cur[state].to_i
+            next if count <= 0
+            state_seconds[state] += count * duration
+          end
+        end
+
+        leave_by_time[time_point].each do |state, count|
+          cur[state] -= count.to_i
+        end
+
+        enter_by_time[time_point].each do |state, count|
+          cur[state] += count.to_i
+        end
+
+        prev_time = time_point
+      end
+
+      total_seconds = state_seconds.values.sum
+
+      items = states.filter_map do |state|
+        seconds = state_seconds[state].to_f
+        next if seconds <= 0
+
+        {
+          state: state,
+          seconds: seconds.round(2),
+          node_hours: (seconds / 3600.0).round(2),
+          percent: total_seconds.positive? ? ((seconds / total_seconds) * 100.0).round(2) : 0.0
+        }
+      end
+
+      {
+        items: items,
+        total_seconds: total_seconds.round(2),
+        total_node_hours: (total_seconds / 3600.0).round(2)
+      }
     end
 
     def comment_params
